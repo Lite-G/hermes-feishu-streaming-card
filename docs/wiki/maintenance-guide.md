@@ -313,3 +313,9 @@ Orphaned integrity fences can be explicitly rebound with `integrity acknowledge-
 完整性监视仍每轮等待 15 秒。只有完整检测得到 `installed` 且 readiness 仅为心跳等待、缺失或过期时，才延后下一次完整源码检测至本轮结束后 300 秒；期间仍检查最新 readiness，不将缺心跳改成 ready。源码变化最多延迟到下一次完整检查（另加检测时间）；离开这三种心跳状态或重启 sidecar 会清除该观察结果。检查失败及可执行修复计划不缓存，任何修复仍使用本轮新证据和原执行器校验。
 
 `/health` 和状态查询读取最后一次已完成检查的原子快照，不等待后台检测/修复锁。快照中的诊断和计数可能落后于正在运行的检查，不能作为新的安装证明或修复授权。单次源码扫描的 CPU 成本未改变；此处减少重复扫描并解除健康接口的锁等待。
+
+## V4.7.5 私聊按钮与目录边界
+
+私聊命令卡的准入证明来自原请求的 task-local context，并复制到 pending state；回调只能由同一聊天和同一用户消费。不得信任 action.value 的 chat_type，不得把「不是 group」当成私聊证据。表单/运维按钮只有真实平台缓存 raw_type=p2p 才进入原生私聊准入，sidecar 继续验证 token/权限。未知聊天沿用保守路径；群聊规则不放宽。
+
+#384 的目录分离尚未受完整维护支持：`gateway_drain_home_verified()` 与 `resolve_hermes_command_binding()` 当前共同要求源码父目录为进程 HOME。不能只把健康检查改成 true，或从全局环境猜 HOME，导致更新写错 drain marker。后续支持必须让安装证明、Gateway 心跳与维护子进程共享同一个可复核 HOME 绑定。正常卡片投递不等于维护身份通过。
