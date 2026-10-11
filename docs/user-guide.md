@@ -1144,3 +1144,5 @@ service:
 认证心跳校验源码与进程 HOME 的共同身份，不匹配的 HOME、共享源码下的另一个 profile、重复心跳均不能接管；健康响应只暴露摘要。Hermes 必须提供进程级 `get_process_hermes_home()`；旧的 task-local HOME API 不足以证明分离布局，保持拒绝。未配置 HOME 时沿用源码父目录，普通布局无需迁移。doctor 会区分已配置绑定和实际运行证明；最终仍需看到 `readiness=ready`、`generation_match=true`、`drain_home_verified=true`。
 
 分离 HOME 或声明 `shared_source: true` 的实例，卡片 `/update` 在确认前拒绝，并引导终端维护。HFC 不负责跨实例排空：共享源码升级前先停止接纳并排空所有使用者，再通过原服务管理器维护。默认 HOME 的 sidecar 也必须声明共享源码，不能只设置独立 profile。此限制不影响正常发卡和 readiness。不要清除其他完整性围栏或手改 hook；`integrity.last_reason` 现在保留脱敏的 owner 原因，便于与 readiness 对照。旧维护任务缺少 HOME 字段时保持原目录语义；新任务携带 HOME，旧版读取时会拒绝，降级前应结束维护任务。
+
+使用独立 env file 时，诊断也传入 `doctor --env-file /原/HFC.env`（或设置 `HFC_ENV_FILE`）；`--hermes-home` 可用于只读诊断，但与已保存绑定冲突时拒绝，不写回配置。

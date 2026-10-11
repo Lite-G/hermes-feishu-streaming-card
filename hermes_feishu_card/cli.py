@@ -250,6 +250,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--config", required=True)
     doctor.add_argument("--hermes-dir")
     doctor.add_argument("--hermes-home")
+    doctor.add_argument("--env-file")
     doctor.add_argument("--skip-hermes", action="store_true")
     doctor.add_argument("--profile-id")
     doctor_output = doctor.add_mutually_exclusive_group()
@@ -971,7 +972,10 @@ def _run_doctor(args: argparse.Namespace) -> int:
         args._profile_id = route_settings["profile_id"]
         args._profile_source = route_settings["profile_source"]
         args._event_url = route_settings["event_url"]
-        config = load_config(config_path)
+        config = load_config(config_path, env_file=route_settings["env_path"])
+        if args.hermes_dir and args.hermes_home is not None:
+            selected_home = setup_hermes_home(Path(args.hermes_dir), config, args.hermes_home)
+            config.setdefault("service", {})["hermes_home"] = str(selected_home)
     except Exception as exc:
         if args.json_output:
             print(

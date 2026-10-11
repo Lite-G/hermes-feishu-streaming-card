@@ -6,6 +6,7 @@
 
 - `setup --hermes-home /实际/Hermes/HOME` 把绑定写入选定的 HFC `.env`；也可配置 `service.hermes_home`。安装、PM 解释器选择、启动检查和认证心跳沿用同一 HOME。普通 `HERMES_HOME` 不会覆盖侧车的显式绑定。
 - 共享源码的不同 HOME 使用不同身份摘要。错误 HOME、旧的仅源码身份和重复心跳均不能接管；要求 Hermes 提供进程级 `get_process_hermes_home()`，不能以 task-local profile API 代替。
+- `doctor --env-file` 和 `HFC_ENV_FILE` 读取与 setup 相同的绑定；显式 `--hermes-home` 冲突时在探测前拒绝，诊断不会写回配置。
 - `integrity.last_reason` 保留脱敏后的 owner 原因，不再把 `runtime_owner_unverified` 等已知诊断变成 `unknown`。doctor 区分配置绑定和实际运行证明。
 - 普通源码父目录布局保持旧身份；Docker 无凭据首装仍允许先安装 hook 再配置 Hermes。分离 HOME 须为包含 Hermes `config.yaml` 的绝对目录。
 - 维护任务记录 HOME，配置改绑后旧任务拒绝执行。分离 HOME 或 `service.shared_source: true` 的实例在卡片更新前明确拒绝，要求终端维护；不会自行清除完整性围栏。
