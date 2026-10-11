@@ -60,6 +60,16 @@ def test_legacy_task_home_api_cannot_authorize_split_home(tmp_path, monkeypatch)
     assert not hook_runtime.gateway_drain_home_verified()
 
 
+def test_config_binding_preserves_legacy_bootstrap_but_requires_split_config(tmp_path):
+    from hermes_feishu_card.instance_binding import configured_hermes_home
+    root = tmp_path / 'hermes'
+    assert configured_hermes_home(root, {'service': {'hermes_home': str(tmp_path)}}) == tmp_path
+    split = tmp_path / 'data'
+    split.mkdir()
+    with pytest.raises(ValueError, match='config.yaml'):
+        configured_hermes_home(root, {'service': {'hermes_home': str(split)}})
+
+
 def test_bound_maintenance_commands_use_only_selected_home_and_pm(tmp_path, monkeypatch):
     import os
     from hermes_feishu_card import maintenance_update as m

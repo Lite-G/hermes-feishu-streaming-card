@@ -1344,7 +1344,7 @@ def _build_doctor_report(
         )
 
     if _manifest_version_candidate(_manifest_path(detection.root)) == 3:
-        install_state, recovery_plan = _diagnose_v3_install_state(detection, args)
+        install_state, recovery_plan = _diagnose_v3_install_state(detection, args, **home_options)
         integrity_plan = None
     else:
         install_state = _diagnose_install_state(detection)
@@ -2316,12 +2316,13 @@ def _diagnose_install_state(detection: HermesDetection) -> dict[str, Any]:
 def _diagnose_v3_install_state(
     detection: HermesDetection,
     args: argparse.Namespace,
+    *, hermes_home: Path | None = None,
 ) -> tuple[dict[str, Any], RecoveryPlan]:
     manifest_path = _manifest_path(detection.root)
     try:
         binding = resolve_runtime_binding(
             checkout_root=detection.root,
-            hermes_home=getattr(args, "hermes_home", None),
+            hermes_home=hermes_home if hermes_home is not None else getattr(args, "hermes_home", None),
             profile_id=getattr(args, "profile_id", None),
         )
         entrypoint = probe_plugin_entrypoint(
@@ -2764,9 +2765,15 @@ def _lifecycle_hook_check(args: argparse.Namespace) -> dict[str, object] | None:
     manifest_path = verified_root / MANIFEST_NAME
     if _manifest_version_candidate(manifest_path) == 3:
         try:
+            lifecycle_config = load_config(
+                args.config, env_file=getattr(args, "env_file", None) or os.environ.get("HFC_ENV_FILE"),
+            )
+            selected_home = getattr(args, "hermes_home", None)
+            if (lifecycle_config.get("service") or {}).get("hermes_home") is not None:
+                selected_home = setup_hermes_home(verified_root, lifecycle_config, selected_home)
             binding = resolve_runtime_binding(
                 checkout_root=verified_root,
-                hermes_home=getattr(args, "hermes_home", None),
+                hermes_home=selected_home,
                 profile_id=getattr(args, "profile_id", None),
             )
             entrypoint = probe_plugin_entrypoint(

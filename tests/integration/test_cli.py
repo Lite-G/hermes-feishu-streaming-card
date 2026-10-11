@@ -2298,3 +2298,20 @@ def test_chats_multi_profile_requires_explicit_existing_profile_without_id_leak(
     assert raw_chat_id not in success.out + success.err
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["profiles"]["work"]["bindings"]["native_chats"] == [raw_chat_id]
+
+
+def test_lifecycle_v3_check_reuses_home_saved_in_selected_env(tmp_path, monkeypatch):
+    root=tmp_path/'hermes'; root.mkdir()
+    (root/cli_module.MANIFEST_NAME).write_text('{"manifest_version":3}')
+    home=tmp_path/'profile'; home.mkdir(); (home/'config.yaml').write_text('{}')
+    config=tmp_path/'hfc.yaml'; config.write_text('{}')
+    env=tmp_path/'selected.env'; env.write_text('HERMES_FEISHU_CARD_HERMES_HOME='+str(home)+'\n')
+    monkeypatch.setattr(cli_module,'detect_hermes',lambda _:SimpleNamespace(supported=True,root=root))
+    monkeypatch.setattr(cli_module,'_verified_explicit_hermes_root',lambda *a,**k:root)
+    seen=[]
+    monkeypatch.setattr(cli_module,'resolve_runtime_binding',lambda **kw:seen.append(kw) or object())
+    monkeypatch.setattr(cli_module,'probe_plugin_entrypoint',lambda *a,**k:object())
+    monkeypatch.setattr(cli_module,'inspect_fixed_tag_hybrid_install',lambda **k:object())
+    result=cli_module._lifecycle_hook_check(SimpleNamespace(hermes_dir=str(root),config=str(config),
+        env_file=str(env),hermes_home=None,profile_id='profile'))
+    assert result['status']=='installed' and seen[0]['hermes_home']==home

@@ -49,6 +49,14 @@ def copy_hermes(tmp_path):
     return hermes_dir
 
 
+def test_install_explicit_legacy_home_before_hermes_config_exists(tmp_path):
+    hermes_dir = copy_hermes(tmp_path)
+    result = run_cli('install', '--hermes-dir', str(hermes_dir),
+                     '--hermes-home', str(tmp_path), '--yes')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (hermes_dir / MANIFEST_NAME).is_file()
+
+
 def test_runtime_feishu_sdk_probe_allows_windows_cold_start(monkeypatch):
     observed = {}
 

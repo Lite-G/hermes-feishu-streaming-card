@@ -19,7 +19,11 @@ def configured_hermes_home(root: Path, config: Mapping[str, Any]) -> Path:
         home = Path(value).resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise ValueError('service.hermes_home is unavailable') from exc
-    if not home.is_dir() or not (home / 'config.yaml').is_file():
+    if not home.is_dir():
+        raise ValueError('service.hermes_home must be a directory')
+    # Legacy source-parent installations can bootstrap before Hermes setup.
+    # A split HOME needs its config to establish the explicit instance binding.
+    if home != selected_root.parent and not (home / 'config.yaml').is_file():
         raise ValueError('service.hermes_home requires a Hermes config.yaml')
     return home
 
