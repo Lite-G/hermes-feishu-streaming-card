@@ -218,6 +218,8 @@ HFC 采用 **sidecar-only** 架构：Hermes 运行任务，安装器管理必要
 
 ## 贡献者
 
+- #384：感谢 [lanx214](https://github.com/lanx214)、[Lite-G](https://github.com/Lite-G) 与 [7360403-coder](https://github.com/7360403-coder) 提供分离 HOME、共享源码与 NAS 容器的复现及诊断证据。
+
 - [yulong-ge](https://github.com/yulong-ge) 在 [#382](https://github.com/baileyh8/hermes-feishu-streaming-card/issues/382) 提供 PM 托管环境安装失败的复现与诊断证据。
 
 - V4.7.3: [lanx214](https://github.com/lanx214)（#378）提供性能故障证据；[ywarmy](https://github.com/ywarmy)（#372）提供现场复测和恢复文档建议。

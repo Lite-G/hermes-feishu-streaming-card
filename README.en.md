@@ -224,6 +224,8 @@ See [release history](docs/release-history.en.md) for earlier versions, and [CHA
 
 ## Contributors
 
+- #384: Thanks to [lanx214](https://github.com/lanx214), [Lite-G](https://github.com/Lite-G), and [7360403-coder](https://github.com/7360403-coder) for split-HOME, shared-source and NAS container evidence.
+
 - [yulong-ge](https://github.com/yulong-ge) supplied PM-managed runtime installation reproduction and diagnostics in [#382](https://github.com/baileyh8/hermes-feishu-streaming-card/issues/382).
 
 - V4.7.3: [lanx214](https://github.com/lanx214) (#378), performance evidence; [ywarmy](https://github.com/ywarmy) (#372), field verification and recovery-documentation feedback.
