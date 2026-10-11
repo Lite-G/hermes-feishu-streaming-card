@@ -941,17 +941,19 @@ def _run_state_machine(
             )
         if current.hermes_home is not None and current.hermes_home.resolve() != current.hermes_root.resolve().parent:
             return _fail_job(current, "split_home_requires_manual_update", "no_mutation", publisher)
-        if current.hermes_home is not None:
-            try:
-                from .config import load_config
-                from .instance_binding import configured_hermes_home
-                fresh_config = load_config(current.config_path, env_file=current.env_file)
-                if (fresh_config.get("service") or {}).get("shared_source", False):
-                    return _fail_job(current, "shared_source_requires_manual_update", "no_mutation", publisher)
-                if configured_hermes_home(current.hermes_root, fresh_config) != current.hermes_home:
-                    raise ValueError("HOME changed")
-            except (OSError, ValueError):
-                return _fail_job(current, "hermes_home_binding_changed", "no_mutation", publisher)
+        try:
+            from .config import load_config
+            from .instance_binding import configured_hermes_home
+            fresh_config = load_config(current.config_path, env_file=current.env_file)
+            if (fresh_config.get("service") or {}).get("shared_source", False):
+                return _fail_job(current, "shared_source_requires_manual_update", "no_mutation", publisher)
+            # Pre-binding jobs keep their legacy HOME, but must not execute after
+            # that configuration has been repurposed for another instance.
+            job_home = current.hermes_home or current.hermes_root.resolve().parent
+            if configured_hermes_home(current.hermes_root, fresh_config) != job_home:
+                raise ValueError("HOME changed")
+        except (OSError, ValueError):
+            return _fail_job(current, "hermes_home_binding_changed", "no_mutation", publisher)
         boundary = _DRAIN_RECONCILIATION_BOUNDARIES[current.phase]
         try:
             binding = resolve_hermes_command_binding(current.hermes_root, hermes_home=current.hermes_home)
