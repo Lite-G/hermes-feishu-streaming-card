@@ -39,6 +39,7 @@ V3.8.2 起，最终答案保留在主内容区，pre-tool answer 会按“正文
 | 页脚统计 | `footer_fields` 决定字段和顺序；`text_sizes.footer` | 数据必须有真实来源；订阅额度只在可归属的 GPT / openai-codex 轮次显示 |
 | 宽度与字号 | `width_mode`、`text_sizes`（支持 pc / mobile） | 不设置像素高度，实际折行由客户端决定 |
 | 超长表格 | `table_overflow_mode` | `compact` 保留为字段列表；`truncate` 沿用表格截断策略 |
+| 正文表格 | `native_tables` | 开启后正文表格用原生 `table` 组件（列宽 + 自动行高）；默认 `false` 保持 Markdown 布局 |
 | 完成提醒 | `completion_notify.enabled`、`placement`、`mention` | 默认关闭；编辑卡片里的 @ 不保证推送通知 |
 | 附件摘要 | 随附件出现 | 没有独立隐藏开关 |
 | 整个聊天不用卡片 | `bindings.native_chats` | 属于投递选择，回到 Hermes 原生回复 |
@@ -836,6 +837,30 @@ profiles:
 ```
 
 该设置适用于 HFC 的 JSON 2.0 发卡路径，包括回复流式/终态、超长内容交接与修复卡片。JSON 1.0 审批/旧版卡片不支持此字段，仍使用原有 `wide_screen_mode`，不会被转换成 JSON 2.0。宽度模式不是固定像素尺寸控制；不能设置固定像素高度，也不能绕过 Feishu/Lark 客户端的窗口、设备和布局限制，最终显示由客户端决定。
+
+### 正文表格
+
+`card.native_tables`（默认 `false`）把正文里的 Markdown 表格渲染成飞书卡片**原生 `table` 组件**：
+
+```yaml
+card:
+  native_tables: true
+```
+
+飞书富文本（Markdown）组件的表格语法**不支持设置列宽**，列宽只能由客户端按内容自动分配，长值列容易被挤成中文硬折。原生 `table` 组件支持 `row_height: auto`（行高随内容撑开，而不是把单元格末尾省略）与逐列 `width`。开启后 HFC 会：
+
+- 按内容计算列宽百分比（每列限制在 15%~70%，合计 100%）；
+- 固定 `row_height: auto`、`row_max_height: 999px`、灰色表头；
+- `page_size` 取 `min(数据行数, 10)`（飞书只接受 1~10）；
+- 表格按原顺序与前后正文交错，`element_id` 形如 `main_content_t0`。
+
+边界与回退：
+
+- 只转换能被原生组件表示的表格：没有数据行、或列数超过 50 的表格保留原 Markdown 文本。
+- 开启后整卡若超出飞书安全预算（5 张表 / 200 个元素 / 28,000 UTF-8 字节），会先按 `false` 重新渲染一次 Markdown 版本，再退回超长内容交接，不会为了表格丢掉答案。
+- 单张卡片最多 5 个表格组件的限制不变（第 6 张起仍由 `table_overflow_mode` 处理）。
+- `row_height: auto` 需要飞书客户端 V7.33+，`data_type: markdown` 需要 V7.14+；更旧的客户端会退化为固定行高并省略单元格末尾。
+- 默认 `false` 时正文渲染与之前逐字节一致；支持 profile / bot 覆盖，改完需要重启 sidecar。
 
 ### 卡片字号
 

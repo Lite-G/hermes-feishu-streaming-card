@@ -119,6 +119,7 @@ card:
   title: Hermes Agent
   width_mode: default  # default | compact | fill
   table_overflow_mode: compact
+  native_tables: false
   footer_fields: [duration, model, input_tokens, output_tokens, context]
 bindings:
   native_chats: []
@@ -129,6 +130,8 @@ service:
 ```
 
 `card.width_mode` 支持 `default`、`compact`、`fill`（自适应聊天窗口宽度），仅作用于 JSON 2.0 卡片；默认保持原布局，支持 profile/bot 覆盖，显式 `default` 可重置继承值。JSON 1.0 审批卡不变，最终尺寸仍由客户端决定。详见[卡片宽度配置](docs/user-guide.md#卡片宽度)。
+
+`card.native_tables`（默认 `false`）把正文 Markdown 表格渲染成飞书卡片原生 `table` 组件：列宽按内容计算，`row_height: auto` 让长内容换行而不是被单元格末尾省略。无法用原生组件表示的表格、以及因此超出卡片预算的整卡，都会回退到 Markdown 布局。详见[正文表格](docs/user-guide.md#正文表格)。
 
 配置同目录的 `.env`：
 

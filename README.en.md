@@ -125,6 +125,7 @@ card:
   title: Hermes Agent
   width_mode: default  # default | compact | fill
   table_overflow_mode: compact
+  native_tables: false
   footer_fields: [duration, model, input_tokens, output_tokens, context]
 bindings:
   native_chats: []
@@ -135,6 +136,8 @@ service:
 ```
 
 `card.width_mode` supports `default`, `compact`, and `fill` (adaptive chat-window width) for JSON 2.0 cards. The default preserves existing layout; profile/bot overrides are supported, and explicit `default` resets an inherited mode. JSON 1.0 approval cards are unchanged; clients control final dimensions. See [card width configuration](docs/user-guide.en.md#card-width).
+
+`card.native_tables` (default `false`) renders body Markdown tables as the card's native `table` element, so column widths follow the content and `row_height: auto` wraps a long cell instead of clipping it. Tables that cannot be represented natively, and cards that would exceed the safe budget because of the richer payload, fall back to the Markdown layout. See [body tables](docs/user-guide.en.md#body-tables).
 
 Place `.env` beside the config:
 
