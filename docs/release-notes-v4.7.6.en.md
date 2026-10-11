@@ -6,6 +6,7 @@ A system source install such as `/usr/local/lib/hermes-agent` with data in `/roo
 
 - `setup --hermes-home /actual/Hermes/HOME` persists the binding in the selected HFC env file; `service.hermes_home` is also supported. Install, PM selection, lifecycle checks and signed heartbeats use the same HOME. Ambient `HERMES_HOME` does not override the sidecar binding.
 - Separate HOMEs sharing source have different target digests. Wrong HOME, legacy source-only claims and replay cannot take ownership. Split layouts require Hermes' process-scoped `get_process_hermes_home()`; a task-local profile API is insufficient.
+- Doctor loads the same binding via `--env-file` or `HFC_ENV_FILE`; conflicting `--hermes-home` refuses before probes, without rewriting configuration.
 - `integrity.last_reason` preserves safe owner diagnostics rather than reporting known reasons as `unknown`. Doctor separates configured binding from live runtime evidence.
 - Legacy source-parent identities remain unchanged. Credential-free Docker bootstrap can install hooks before Hermes configuration; split HOME must be an absolute directory containing Hermes `config.yaml`.
 - Maintenance jobs capture HOME and refuse execution after configuration reassignment. Split HOME and `service.shared_source: true` refuse card updates before mutation and require terminal maintenance. Integrity fences are not cleared automatically.
