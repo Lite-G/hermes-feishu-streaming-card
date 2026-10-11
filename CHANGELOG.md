@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## v4.7.6 — 2026-10-11
 
-Bind split source/process HOME installations through setup, authenticated heartbeats, PM selection and durable maintenance jobs (#384). Preserve ownership diagnostics; refuse split/shared-source card updates before mutation. Existing source-parent identities and persisted fences remain unchanged.
+Bind split source/process HOME installations through setup, authenticated heartbeats, PM selection and durable maintenance jobs (#384). Preserve ownership diagnostics; refuse split/shared-source card updates before mutation. Existing source-parent identities and persisted fences remain unchanged. Preserve credential-free bootstrap and refuse old maintenance jobs after instance reassignment. See [release notes](docs/release-notes-v4.7.6.md).
 
 ## v4.7.5 — 2026-10-11
 
