@@ -794,7 +794,7 @@ card:
 
 The Markdown rich-text component cannot set a table column width ("表格的富文本语法不支持设置列宽等"), so the client distributes the columns by content and a long value column is squeezed into mid-word breaks. The native `table` element supports `row_height: auto` — the row grows to fit wrapped content instead of clipping the cell with an ellipsis — plus a per-column `width`. When enabled, HFC:
 
-- derives percent column widths from the content (each column clamped to 15%~70%, summing to 100%);
+- derives column percentages summing to 100%; 2–6 columns use 15%~70% bounds, a single column fills the width, and wider tables use a lower minimum;
 - sets `row_height: auto`, `row_max_height: 999px` and a grey header;
 - sets `page_size` to `min(data rows, 10)` (Feishu accepts 1~10 only);
 - keeps the original order, interleaving table elements with the surrounding Markdown, with ids like `main_content_t0`.

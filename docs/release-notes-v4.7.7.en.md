@@ -10,4 +10,6 @@ Regression coverage includes 1,199/1,200/1,201/5,000 characters, Chinese/ASCII, 
 
 Thanks to [ywarmy](https://github.com/ywarmy) for the native-table implementation and CardKit API evidence in [PR #391](https://github.com/baileyh8/hermes-feishu-streaming-card/pull/391). Original authorship and historical contributor credits are preserved.
 
-Real Feishu CardKit create/update passed. Desktop light-theme inspection confirmed readable native tables and a scrollable Markdown cell reaching its tail marker; a 5,000-character header passed API validation. Android/iOS and a new Gateway/model round trip are unverified. See the [acceptance record](reviews/2026-10-12-native-tables-acceptance.md).
+Real Feishu CardKit create/update passed. Feishu 8.1.17 desktop light/dark-theme inspection confirmed readable native tables and a scrollable Markdown cell reaching its tail marker; a 5,000-character header passed API validation. Android/iOS and a new Gateway/model round trip are unverified. See the [acceptance record](reviews/2026-10-12-native-tables-acceptance.md).
+
+Release scope explicitly approved: desktop/API verification, native tables off by default, Android/iOS unverified. Column percentages now sum to 100% for every supported column count, including one and seven or more columns.

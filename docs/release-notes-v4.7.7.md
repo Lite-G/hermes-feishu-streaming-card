@@ -10,4 +10,6 @@
 
 感谢 [ywarmy](https://github.com/ywarmy) 的 [PR #391](https://github.com/baileyh8/hermes-feishu-streaming-card/pull/391) 原生表格实现与 CardKit API 验收证据；保留原始代码作者与历史贡献记录。
 
-真实飞书 CardKit 创建/更新通过；桌面浅色验收确认原生表格可读、超长 Markdown 单元格可滚动到完整尾标。5,000 字符表头通过 API 校验。Android/iOS 和新的 Gateway/model 端到端轮次未验证，详见[验收记录](reviews/2026-10-12-native-tables-acceptance.md)。
+真实飞书 CardKit 创建/更新通过；飞书 8.1.17 桌面浅色/深色验收确认原生表格可读、超长 Markdown 单元格可滚动到完整尾标。5,000 字符表头通过 API 校验。Android/iOS 和新的 Gateway/model 端到端轮次未验证，详见[验收记录](reviews/2026-10-12-native-tables-acceptance.md)。
+
+本次已获明确授权按桌面/API 范围发布，原生表格默认关闭，Android/iOS 未验证。另修正单列和七列以上的列宽分配，所有支持列数的宽度合计均为 100%。

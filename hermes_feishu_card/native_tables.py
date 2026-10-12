@@ -48,6 +48,11 @@ def column_widths(
     cell keeps a genuine outlier from being cut, and the clamps stop one column
     from owning the whole canvas.
     """
+    if column_count == 1:
+        return ["100%"]
+    # Seven or more columns cannot all occupy at least 15%. Lower the floor
+    # for wide tables so rounding can still produce exactly 100% in total.
+    min_percent = min(MIN_COLUMN_PERCENT, 100 // column_count)
     weights: list[int] = []
     for index in range(column_count):
         lengths = [len(headers[index]) if index < len(headers) else 0]
@@ -58,7 +63,7 @@ def column_widths(
         weights.append(max(6, min(48, round(max(mean, probe, 0.75 * ordered[-1])))))
     total = sum(weights) or column_count
     percents = [
-        max(MIN_COLUMN_PERCENT, min(MAX_COLUMN_PERCENT, round(weight * 100 / total)))
+        max(min_percent, min(MAX_COLUMN_PERCENT, round(weight * 100 / total)))
         for weight in weights
     ]
     drift = sum(percents) - 100
@@ -67,7 +72,7 @@ def column_widths(
             range(column_count), key=lambda position: percents[position], reverse=drift > 0
         ):
             if drift > 0:
-                step = min(drift, percents[index] - MIN_COLUMN_PERCENT)
+                step = min(drift, percents[index] - min_percent)
                 percents[index] -= step
                 drift -= step
             else:

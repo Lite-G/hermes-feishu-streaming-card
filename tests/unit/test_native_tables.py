@@ -170,6 +170,16 @@ def test_ragged_rows_and_escaped_pipes_are_normalized():
     assert native["rows"][1]["c0"] == "x|y"
 
 
+@pytest.mark.parametrize("columns", range(1, 51))
+def test_column_widths_fill_available_width_for_all_supported_column_counts(columns):
+    headers = tuple("h" for _ in range(columns))
+    rows = (tuple("long value" * (index + 1) for index in range(columns)),)
+    widths = [int(value[:-1]) for value in column_widths(headers, rows, columns)]
+    assert len(widths) == columns
+    assert sum(widths) == 100
+    assert all(0 < width <= 100 for width in widths)
+
+
 def test_cell_normalization_is_lossless_and_single_line():
     assert normalize_cell(None) == ""
     assert normalize_cell("  a\nb  ") == "a b"
