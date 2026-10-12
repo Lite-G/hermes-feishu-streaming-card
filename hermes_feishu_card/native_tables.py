@@ -31,8 +31,6 @@ def normalize_cell(value: Any) -> str:
     """Normalize one Markdown table cell into a native table cell string."""
     text = "" if value is None else str(value)
     text = text.replace("\\|", "|").replace("\r", " ").replace("\n", " ").strip()
-    if len(text) > MAX_CELL_CHARS:
-        text = text[: MAX_CELL_CHARS - 1].rstrip() + "…"
     return text
 
 
@@ -86,8 +84,9 @@ def build_table_element(table: MarkdownTable, index: int) -> Optional[Dict[str, 
 
     ``row_height: auto`` is the point of the conversion: it grows the row to fit
     wrapped content instead of clipping the cell. Returns ``None`` when the
-    table cannot be represented natively (no data rows, or more columns than
-    Feishu accepts), so the caller keeps the original Markdown text for it.
+    table cannot be represented natively (no data rows, too many columns, or
+    a header/cell beyond our native display limit), so the caller keeps the
+    original Markdown text for it. Final answer content must never be truncated.
     """
     column_count = max(
         [len(table.headers), *(len(row) for row in table.rows)],
@@ -96,6 +95,11 @@ def build_table_element(table: MarkdownTable, index: int) -> Optional[Dict[str, 
     if column_count < 1 or column_count > MAX_COLUMNS or not table.rows:
         return None
     headers = _stable_table_headers(table.headers, column_count)
+    if any(len(normalize_cell(value)) > MAX_CELL_CHARS for value in headers) or any(
+        len(normalize_cell(value)) > MAX_CELL_CHARS
+        for row in table.rows for value in row
+    ):
+        return None
     names = [f"c{position}" for position in range(column_count)]
     widths = column_widths(table.headers, table.rows, column_count)
     columns = [

@@ -578,21 +578,21 @@ High-frequency streaming knobs usually do not need manual tuning:
 
 ## Docker Containers
 
-Examples pin `v4.7.6`; the default `latest` resolves the published stable release. See [release notes](release-notes-v4.7.1.en.md) for validation boundaries.
+Examples pin `v4.7.7`; the default `latest` resolves the published stable release. See [release notes](release-notes-v4.7.1.en.md) for validation boundaries.
 
 Use `install-docker.sh` inside an existing Hermes container. It defaults to
 `/opt/hermes` for Hermes and `/opt/data/config.yaml` for sidecar config. The
 script selects Hermes venv Python and does not fall back to system Python unless
 `HFC_PYTHON` is set.
 
-The Compose example defaults `HFC_VERSION` to `v4.7.6`.
+The Compose example defaults `HFC_VERSION` to `v4.7.7`.
 
 Example:
 
 ```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=xxx
-export HFC_VERSION=v4.7.6
+export HFC_VERSION=v4.7.7
 bash install-docker.sh --profile-id child --event-url http://hfc-sidecar:8765/events
 ```
 
@@ -801,11 +801,11 @@ The Markdown rich-text component cannot set a table column width ("表格的富�
 
 Boundaries and fallback:
 
-- Only tables the native element can represent are converted: a table without data rows, or with more than 50 columns, keeps its Markdown text.
+- Only tables the native element can represent are converted: tables without data rows, with more than 50 columns, or with any normalized header/cell exceeding 1,200 characters keep their complete Markdown. Other eligible tables still convert. The 1,200-character threshold is an HFC display policy, not a claim about the platform API limit.
 - If the richer payload pushes the whole card past the safe Feishu budget (5 tables / 200 elements / 28,000 UTF-8 bytes), HFC re-renders once with `false` before the long-content handoff, so a table never costs the answer.
 - The five-tables-per-card limit is unchanged (table six onward is still handled by `table_overflow_mode`).
 - `row_height: auto` requires Feishu client V7.33+ and `data_type: markdown` requires V7.14+; older clients fall back to a fixed row height and an ellipsis at the cell edge.
-- With the default `false` the body render is byte-identical to before; profile / bot overrides are supported and the sidecar must be restarted.
+- The default `false` keeps the Markdown layout; indivisible tables now retain their full source rather than a fold notice; profile / bot overrides are supported and the sidecar must be restarted.
 
 ### Card text sizes
 

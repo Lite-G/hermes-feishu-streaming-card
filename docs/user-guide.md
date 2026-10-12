@@ -608,7 +608,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 
 ## Docker 容器内安装 / 更新
 
-以下示例固定 `v4.7.6`；默认 `latest` 解析已发布稳定版。本版的桌面验收范围及未验证项见[发行说明](release-notes-v4.7.1.md)。
+以下示例固定 `v4.7.7`；默认 `latest` 解析已发布稳定版。本版的桌面验收范围及未验证项见[发行说明](release-notes-v4.7.1.md)。
 
 如果 Hermes 运行在已有 Docker 容器里，优先使用 `install-docker.sh`。它默认读取：
 
@@ -617,7 +617,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 | `HERMES_DIR` | `/opt/hermes` | 容器内 Hermes Agent Gateway 目录 |
 | `HFC_CONFIG` | `/opt/data/config.yaml` | sidecar 配置路径 |
 | `HFC_ENV_FILE` | `/opt/data/.env` | 飞书凭据文件 |
-| `HFC_VERSION` | `latest`（脚本）/ `v4.7.6`（Compose 示例） | 指定安装 tag 或分支 |
+| `HFC_VERSION` | `latest`（脚本）/ `v4.7.7`（Compose 示例） | 指定安装 tag 或分支 |
 | `HFC_PYTHON` | 自动检测 Hermes venv | 显式指定容器内 Python |
 
 示例：
@@ -625,7 +625,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 ```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=xxx
-export HFC_VERSION=v4.7.6
+export HFC_VERSION=v4.7.7
 bash install-docker.sh --profile-id child --event-url http://hfc-sidecar:8765/events
 ```
 
@@ -856,11 +856,11 @@ card:
 
 边界与回退：
 
-- 只转换能被原生组件表示的表格：没有数据行、或列数超过 50 的表格保留原 Markdown 文本。
+- 只转换能被原生组件表示的表格：没有数据行、列数超过 50、任一规范化表头或单元格超过 1,200 字符时，整表保留完整 Markdown，其余合格表格仍可转换。1,200 字符是 HFC 的展示策略，不代表平台 API 上限。
 - 开启后整卡若超出飞书安全预算（5 张表 / 200 个元素 / 28,000 UTF-8 字节），会先按 `false` 重新渲染一次 Markdown 版本，再退回超长内容交接，不会为了表格丢掉答案。
 - 单张卡片最多 5 个表格组件的限制不变（第 6 张起仍由 `table_overflow_mode` 处理）。
 - `row_height: auto` 需要飞书客户端 V7.33+，`data_type: markdown` 需要 V7.14+；更旧的客户端会退化为固定行高并省略单元格末尾。
-- 默认 `false` 时正文渲染与之前逐字节一致；支持 profile / bot 覆盖，改完需要重启 sidecar。
+- 默认 `false` 保持 Markdown 布局；无法拆分的表格现保留完整原文，不再仅显示折叠提示；支持 profile / bot 覆盖，改完需要重启 sidecar。
 
 ### 卡片字号
 

@@ -9,6 +9,8 @@ tables as the card's native ``table`` element instead, which supports
 import json
 import time
 
+import pytest
+
 from hermes_feishu_card.card_limits import inspect_card_limits
 from hermes_feishu_card.native_tables import (
     build_main_content_elements,
@@ -168,13 +170,75 @@ def test_ragged_rows_and_escaped_pipes_are_normalized():
     assert native["rows"][1]["c0"] == "x|y"
 
 
-def test_cell_normalization_is_bounded_and_single_line():
+def test_cell_normalization_is_lossless_and_single_line():
     assert normalize_cell(None) == ""
     assert normalize_cell("  a\nb  ") == "a b"
     assert normalize_cell("x\\|y") == "x|y"
     long = normalize_cell("字" * 5000)
-    assert len(long) == 1200
-    assert long.endswith("…")
+    assert long == "字" * 5000
+
+
+@pytest.mark.parametrize("length", [1199, 1200, 1201, 5000])
+@pytest.mark.parametrize("character", ["x", "字"])
+@pytest.mark.parametrize("position", ["header", "body"])
+@pytest.mark.parametrize("presentation", ["default", "task"])
+def test_long_cells_preserve_complete_content(length, character, position, presentation):
+    marker = "TAIL_MUST_SURVIVE"
+    value = character * (length - len(marker)) + marker
+    header = value if position == "header" else "value"
+    body = value if position == "body" else "data"
+    text = f"| key | {header} |\n| --- | --- |\n| item | {body} |\n"
+    session = _session(text)
+    card = (
+        render_card(session, native_tables=True)
+        if presentation == "default"
+        else render_card_result(session, native_tables=True, presentation="task").card
+    )
+    elements = _main_elements(card)
+    if length <= 1200:
+        table = _table_element(card)
+        actual = (
+            table["columns"][1]["display_name"]
+            if position == "header" else table["rows"][0]["c1"]
+        )
+        assert actual == value
+    else:
+        assert all(element["tag"] == "markdown" for element in elements)
+        markdown = "".join(element["content"] for element in elements)
+        if position == "header":
+            assert value in markdown
+        else:
+            # Markdown may repeat headers while splitting an oversized data row.
+            tables = [block.table for element in elements
+                      for block in scan_markdown_blocks(element["content"])
+                      if block.table is not None]
+            assert "".join(row[1] for table in tables for row in table.rows) == value
+    assert inspect_card_limits(card).safe
+
+
+def test_oversized_table_fallback_preserves_order_between_native_tables():
+    value = "字" * 1200 + "TAIL_MUST_SURVIVE"
+    oversized = f"| key | value |\n| --- | --- |\n| item | {value} |\n"
+    text = STATUS_TABLE + "\nBEFORE\n\n" + oversized + "\nAFTER\n\n" + STATUS_TABLE
+    elements = build_main_content_elements_chunked(text)
+    assert [element["tag"] for element in elements] == ["table", "markdown", "table"]
+    assert oversized in elements[1]["content"]
+    assert elements[1]["content"].index("BEFORE") < elements[1]["content"].index(value)
+    assert elements[1]["content"].index(value) < elements[1]["content"].index("AFTER")
+    ids = [element["element_id"] for element in elements]
+    assert len(ids) == len(set(ids))
+
+
+@pytest.mark.parametrize("native_tables", [False, True])
+@pytest.mark.parametrize("presentation", ["classic", "task"])
+def test_indivisible_table_exceeding_card_budget_hands_off_complete_answer(native_tables, presentation):
+    value = "字" * 10000 + "TAIL_MUST_SURVIVE"
+    text = f"| key | {value} |\n| --- | --- |\n| item | data |\n"
+    session = _session(text)
+    result = render_card_result(session, native_tables=native_tables, presentation=presentation)
+    assert result.disposition == "native"
+    assert session.answer_text == text
+    assert not result.inspection.safe
 
 
 def test_wide_table_falls_back_to_markdown():
