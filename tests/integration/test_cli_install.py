@@ -4887,3 +4887,156 @@ def test_setup_explicit_home_is_saved_for_restart_and_runtime_selection(tmp_path
     code=cli.main(['setup','--hermes-dir',str(hermes_dir),'--hermes-home',str(other),
         '--config',str(config_path),'--env-file',str(env_path),'--skip-start','--yes'])
     assert code==1 and env_path.read_bytes()==before
+
+
+@pytest.fixture
+def verified_cleanup_evidence(tmp_path, monkeypatch):
+    if not posix_transaction._cli_dirfd_binding_supported():
+        pytest.skip("requires POSIX directory-bound evidence cleanup")
+    paths = [tmp_path / "first.bak", tmp_path / "second.bak"]
+    for path in paths:
+        path.write_text(path.name, encoding="utf-8")
+    snapshots, directories = file_transaction._snapshot_restore_evidence(
+        tmp_path, {path.name: path for path in paths}
+    )
+    acquired = []
+    original_bind = posix_transaction._bind_cli_target
+
+    def record_binding(path):
+        binding = original_bind(path)
+        acquired.append((binding, binding.parent_fd))
+        return binding
+
+    monkeypatch.setattr(posix_transaction, "_bind_cli_target", record_binding)
+    yield paths, snapshots, directories, acquired
+    # A real fstat checks the OS resource, not only a mock close call.
+    import errno
+    for binding, descriptor in acquired:
+        assert binding.parent_fd == -1
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == errno.EBADF
+
+
+def test_verified_cleanup_binds_all_before_first_unlink(verified_cleanup_evidence, monkeypatch):
+    paths, snapshots, directories, acquired = verified_cleanup_evidence
+    removed = []
+    original_unlink = posix_transaction._unlink_bound_cli_target
+
+    def checked_unlink(binding, snapshot):
+        assert [item.path for item, _fd in acquired] == paths
+        removed.append(binding.path)
+        return original_unlink(binding, snapshot)
+
+    monkeypatch.setattr(posix_transaction, "_unlink_bound_cli_target", checked_unlink)
+    posix_transaction._remove_verified_restore_evidence(paths, snapshots, directories)
+    assert removed == paths
+    assert all(not path.exists() for path in paths)
+
+
+@pytest.mark.parametrize("failure", ["bind", "snapshot", "unlink"])
+def test_verified_cleanup_failure_closes_acquired_descriptors(
+    verified_cleanup_evidence, monkeypatch, failure
+):
+    paths, snapshots, directories, acquired = verified_cleanup_evidence
+    original_bind = posix_transaction._bind_cli_target
+    original_unlink = posix_transaction._unlink_bound_cli_target
+    removed = []
+
+    def fail_second_bind(path):
+        if path == paths[1]:
+            raise OSError("synthetic second bind failure")
+        return original_bind(path)
+
+    def fail_second_unlink(binding, snapshot):
+        if failure == "unlink" and binding.path == paths[1]:
+            raise OSError("synthetic second unlink failure")
+        removed.append(binding.path)
+        return original_unlink(binding, snapshot)
+
+    if failure == "bind":
+        monkeypatch.setattr(posix_transaction, "_bind_cli_target", fail_second_bind)
+    elif failure == "snapshot":
+        snapshots[paths[1]] = (*snapshots[paths[1]][:2], "wrong-digest")
+    monkeypatch.setattr(posix_transaction, "_unlink_bound_cli_target", fail_second_unlink)
+    with pytest.raises((OSError, ValueError)):
+        posix_transaction._remove_verified_restore_evidence(paths, snapshots, directories)
+    assert len(acquired) == (1 if failure == "bind" else 2)
+    assert removed == ([paths[0]] if failure == "unlink" else [])
+    assert paths[1].read_text(encoding="utf-8") == paths[1].name
+    assert paths[0].exists() is (failure != "unlink")
+
+
+def test_verified_cleanup_close_error_does_not_skip_later_descriptors(
+    verified_cleanup_evidence, monkeypatch
+):
+    paths, snapshots, directories, acquired = verified_cleanup_evidence
+    original_close = posix_transaction._CliTargetBinding.close
+    closed_paths = []
+
+    def close_then_fail_first(binding):
+        original_close(binding)
+        closed_paths.append(binding.path)
+        if binding.path == paths[0]:
+            raise OSError("synthetic close completion error")
+
+    monkeypatch.setattr(posix_transaction._CliTargetBinding, "close", close_then_fail_first)
+    posix_transaction._remove_verified_restore_evidence(paths, snapshots, directories)
+    assert len(acquired) == 2
+    assert closed_paths == paths
+
+
+def test_verified_cleanup_rechecks_missing_evidence_before_unlink(
+    verified_cleanup_evidence, monkeypatch
+):
+    paths, snapshots, directories, acquired = verified_cleanup_evidence
+    paths[1].unlink()
+    snapshots[paths[1]] = None
+    original_safe_unlink = posix_transaction._safe_unlink_restore_evidence
+    injected = False
+
+    def replace_missing_evidence(binding, snapshot):
+        nonlocal injected
+        if binding.path == paths[1]:
+            paths[1].write_text("concurrent evidence", encoding="utf-8")
+            injected = True
+        return original_safe_unlink(binding, snapshot)
+
+    monkeypatch.setattr(posix_transaction, "_safe_unlink_restore_evidence", replace_missing_evidence)
+    with pytest.raises(ValueError, match="changed during restore"):
+        posix_transaction._remove_verified_restore_evidence(paths, snapshots, directories)
+    assert injected and len(acquired) == 2
+    assert not paths[0].exists()
+    assert paths[1].read_text(encoding="utf-8") == "concurrent evidence"
+
+
+def test_verified_cleanup_unsupported_platform_refuses_before_binding(tmp_path, monkeypatch):
+    path = tmp_path / "evidence.bak"
+    path.write_text("preserve", encoding="utf-8")
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
+    monkeypatch.setattr(
+        posix_transaction, "_bind_cli_target",
+        lambda _path: pytest.fail("unsupported platform must not acquire a descriptor"),
+    )
+    with pytest.raises(ValueError, match="secure restore cleanup requires"):
+        posix_transaction._remove_verified_restore_evidence([path], {}, None)
+    assert path.read_text(encoding="utf-8") == "preserve"
+
+
+def test_cli_verified_cleanup_uses_posix_owner(verified_cleanup_evidence, monkeypatch):
+    paths, snapshots, directories, acquired = verified_cleanup_evidence
+    original_remove = posix_transaction._remove_verified_restore_evidence
+    calls = []
+
+    def record_remove(selected_paths, selected_snapshots, selected_directories):
+        calls.append((selected_paths, selected_snapshots, selected_directories))
+        return original_remove(selected_paths, selected_snapshots, selected_directories)
+
+    monkeypatch.setattr(posix_transaction, "_remove_verified_restore_evidence", record_remove)
+    cli._clear_install_state(
+        paths[0], paths[1], manifest=None,
+        restore_identities=snapshots, restore_directory_identities=directories,
+    )
+    assert calls == [(paths, snapshots, directories)]
+    assert len(acquired) == 2
+    assert all(not path.exists() for path in paths)
