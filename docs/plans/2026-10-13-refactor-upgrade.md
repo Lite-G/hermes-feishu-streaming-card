@@ -2,7 +2,7 @@
 
 **状态：实施中。** 日期：2026-10-13。基线：公开 v4.7.7，main/发布提交 `e03c57369503b3364313bf005d7f0e5087650557`。Bailey 已授权用五小时推进落地（北京时间 10:11–15:11）；测试与审查由独立 agent 负责，按固定提交复验。默认值、视觉方向、生产空闲与发布门槛仍按下文执行。
 
-当前进度：结构与体验候选继续实施；截至 L（`472c2fc`）的新增云端矩阵已通过，M 交互预检和 N 排空证明定向独立验收已通过，O 当前卡片刷新规则正在独立验收。普通包最新证据仅覆盖 L；后续候选不能沿用其通过结论。完整客户端矩阵、结果导航及余下职责收敛仍未完成，所有候选保持 Draft，未修改生产。
+当前进度：结构与体验候选继续实施；截至 L（`472c2fc`）的新增云端矩阵已通过，M 交互预检和 N 排空证明定向独立验收已通过，O 当前卡片刷新与 P 清理状态边界也已通过定向独立验收。普通包最新证据仅覆盖 L；后续候选不能沿用其通过结论。完整客户端矩阵、结果导航及余下职责收敛仍未完成，所有候选保持 Draft，未修改生产。
 
 本页是下一阶段的唯一执行计划入口。此前的[审查与产品建议](../reviews/2026-10-13-v5-plan.md)保留事实依据，[代码减负方案](../reviews/2026-10-13-code-surgery.md)保留具体切口；实施顺序、范围调整与完成状态统一记在本页，不维护三份进度表。
 
@@ -329,6 +329,6 @@ T05 交互预检的独立验收已完成：22 项定向测试（15 个新增规�
 
 T14 的 `904d314` 将维护排空健康校验和连续心跳证明迁入 `maintenance_evidence`。轮询、deadline、lease、锁和实际停服保留原编排；聚合 owner 数据仍归 `runtime_ownership`。本次保留原字段校验、30秒新鲜度、同owner递增和无效/忙碌重置语义。独立 operations/ownership/docs/preflight524项及追加route32项通过（有重叠，不累计），Ruff/mypy23模块通过；真实supervisor→wait→run_job命令harness证明忙碌、过期/不完整observer和Gateway冲突均不执行mutation。Draft #406；普通包和full CI另验，未实现多Gateway协同维护，也未改生产。
 
-T05 的 `da3d18b` 把同一阶段的 owner 刷新规则迁入 `owner_display_policy`：pending/paused 普通更新冻结输入，独立回执避免覆盖前一卡，同消息保留 callback/text 方言。采用两阶段判断以保留 failed 回执先 render、之后惰性查询 mode 的顺序；没有把不同阶段的 continuation 创建、重渲染、native ledger 事务合成提前计算的计划。独立测试待执行，完整 T05 尚未结项。
+T05 的 `da3d18b` 把同一阶段的 owner 刷新规则迁入 `owner_display_policy`：pending/paused 普通更新冻结输入，独立回执避免覆盖前一卡，同消息保留 callback/text 方言。采用两阶段判断以保留 failed 回执先 render、之后惰性查询 mode 的顺序；没有把不同阶段的 continuation 创建、重渲染、native ledger 事务合成提前计算的计划。独立 93 个不同运行场景均有通过证据（首轮90过、3项新测试设置错误，修正后仅重跑受影响5项），Ruff/mypy24、docs102和路由4项通过；完整 T05 尚未结项。
 
-T05/T18 的 `da89d6d` 移除 lifecycle 四处对 server 的反向导入，使用借用实时 registry 的 `CleanupState`；server 保留 AppKey 适配，清理所有者保留原身份栅栏、顺序、指标和有界历史。同时删除五个无仓库内消费者的私有导入别名，保留实现及已声明兼容入口。本批正在独立并发/HTTP验收；recovery/integrity 的共享 I/O 和后续完整职责包仍未关闭。
+T05/T18 的 `da89d6d` 移除 lifecycle 四处对 server 的反向导入，使用借用实时 registry 的 `CleanupState`；server 保留 AppKey 适配，清理所有者保留原身份栅栏、顺序、指标和有界历史。同时删除五个无仓库内消费者的私有导入别名，保留实现及已声明兼容入口。本批独立组合回归2263 passed / 1 skipped，Ruff/mypy25通过；纯规则、真实HTTP、cleanup/flush及命令入口覆盖均留证。普通包与full CI另验；recovery/integrity 的共享 I/O 和后续完整职责包仍未关闭。
