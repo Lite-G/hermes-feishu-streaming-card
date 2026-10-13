@@ -453,7 +453,10 @@ def test_real_regular_wheel_plugin_manager_probe_reports_exactly_four_capabiliti
         "approval_observe",
     }
     assert result["reason_code"] == "verified", {
-        "reason_code": result["reason_code"],
+        "reason_code": (
+            result["reason_code"]
+            if result["reason_code"] in native_hooks._REASON_CODES else "unavailable"
+        ),
         "source_commit": (
             result["source_commit"]
             if re.fullmatch(r"[0-9a-f]{40}", str(result.get("source_commit", "")))
