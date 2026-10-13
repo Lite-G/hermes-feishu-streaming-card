@@ -3835,3 +3835,16 @@ async def test_unique_preferred_text_callback_stays_ahead_of_tts_and_executes(mo
     events, native, owner = await _execute_callback_identity(patched, 'stream', monkeypatch)
     assert [name for name, _data in events] == ['answer.delta']
     assert events[0][1]['source'] is owner and native == []
+
+
+@pytest.mark.asyncio
+async def test_unique_tts_only_callback_keeps_legacy_fallback_and_executes(monkeypatch):
+    original = _callback_identity_fixture('stream').replace(
+        '_stream_consumer.on_delta(text)', '_stts_consumer_ref.on_delta(text)'
+    )
+    patched = patcher.apply_patch(original)
+    assert patcher.apply_patch(patched) == patched
+    assert patcher.remove_patch(patched) == original
+    events, native, owner = await _execute_callback_identity(patched, 'stream', monkeypatch)
+    assert [name for name, _data in events] == ['answer.delta']
+    assert events[0][1]['source'] is owner and native == []
