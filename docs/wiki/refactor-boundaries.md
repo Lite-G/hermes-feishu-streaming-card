@@ -77,3 +77,5 @@ resolver 按原 2 秒预算读取完整响应，最多缓存 513 字节；未到
 Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序回滚，以及 Integrity 的 Git/provenance、pre_commit_validate/post validate 和错误包装仍在各执行器。只在本次写入 identity/digest 尚匹配时回滚；替换目录或并发编辑的文件不能被当前 lexical path 覆盖，未知 inode 的 stage 不清除。底层收敛不等于三个恢复计划或 portable/POSIX 策略合并。
 
 本职责包的产品实现需独立验证 Recovery、Integrity 和真实 CLI 三个原入口；既有 CLI writer 绿色证据不能代替另两入口。源码、普通 wheel 和平台验收仍各自登记，不由本页声明通过。
+
+异常 cleanup 的资源释放是单独的行为修复：`cleanup_transaction_resources` 在某个 stage cleanup 或 binding close 失败时，继续处理其余本次已取得资源，最后传播第一原异常，不改异常类型/原因。未知 inode 的临时文件继续保留，拒绝/rollback/授权门禁不变；CLI 的 borrowed binding 只由原所有者关闭。独立测试应在前一个纯收敛提交复现“后续 fd 未关闭”，再在修复提交证明红转绿。

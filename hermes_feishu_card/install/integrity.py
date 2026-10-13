@@ -908,12 +908,10 @@ def _atomic_replace_many(
             raise
         raise IntegrityRepairRefused("integrity repair transaction failed") from exc
     finally:
-        for path in list(staged.values()) + [
-            item for item in rollback.values() if item is not None
-        ]:
-            path.cleanup()
-        for binding in target_bindings.values():
-            binding.release()
+        bound_io.cleanup_transaction_resources(
+            list(staged.values()) + [item for item in rollback.values() if item is not None],
+            target_bindings.values(),
+        )
 
 
 def _bind_target(target: Path) -> _TargetBinding:

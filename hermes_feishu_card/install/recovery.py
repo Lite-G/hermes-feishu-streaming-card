@@ -807,10 +807,9 @@ def _commit_recovery_changes(
             ) from exc
         raise
     finally:
-        for temp_path in list(staged.values()) + list(rollback.values()):
-            temp_path.cleanup()
-        for binding in target_bindings.values():
-            binding.release()
+        bound_io.cleanup_transaction_resources(
+            list(staged.values()) + list(rollback.values()), target_bindings.values(),
+        )
 
 
 def _rollback_recovery_changes(

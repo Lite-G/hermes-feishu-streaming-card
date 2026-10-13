@@ -6,6 +6,7 @@ It never loads CLI, Hermes detection, configuration or network services.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 import hashlib
 import os
@@ -447,6 +448,29 @@ def cleanup_stage(staged: BoundStage) -> None:
 
 
 
+def cleanup_transaction_resources(
+    stages: Iterable[BoundStage], bindings: Iterable[BoundTarget],
+) -> None:
+    """Release other acquired resources before propagating a cleanup failure.
+
+    Stage ownership rules and the first original exception are preserved. A
+    failed stat/unlink must not prevent later stages or bound fds being closed.
+    """
+    first_error: Exception | None = None
+    for staged in stages:
+        try:
+            staged.cleanup()
+        except Exception as exc:
+            first_error = first_error or exc
+    for binding in bindings:
+        try:
+            binding.release()
+        except Exception as exc:
+            first_error = first_error or exc
+    if first_error is not None:
+        raise first_error
+
+
 class _CliTargetBinding(BoundTarget):
     def __init__(
         self, path: Path, parent_fd: int, parent_identity: _RestoreIdentity,
@@ -551,11 +575,10 @@ def _atomic_write_text(
                 raise ValueError("directory changed during write") from exc
         return committed
     finally:
-        for staged in (write_stage, rollback_stage):
-            if staged is not None:
-                _cleanup_bound_cli_stage(binding, staged)
-        if owns_binding:
-            binding.close()
+        stages = [staged for staged in (write_stage, rollback_stage) if staged is not None]
+        for staged in stages:
+            staged.parent_fd = binding.parent_fd
+        cleanup_transaction_resources(stages, [binding] if owns_binding else [])
 
 
 def _bind_cli_target(path: Path) -> _CliTargetBinding:
