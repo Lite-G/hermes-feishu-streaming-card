@@ -313,7 +313,9 @@
       "appearance"
     ],
     "hermes_feishu_card/lifecycle.py": [
-      "process"
+      "process",
+      "runtime",
+      "render"
     ],
     "hermes_feishu_card/maintenance_card.py": [
       "operations"

@@ -2327,7 +2327,7 @@ def test_cleanup_runtime_state_removes_related_state_and_counts_once():
         "om_card",
     )
 
-    result = cleanup_runtime_state(app, now=3700.0)
+    result = cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), now=3700.0)
 
     assert result.session_keys == (session_key,)
     assert result.reasons == ("terminal_retention_expired",)
@@ -2353,7 +2353,7 @@ def test_cleanup_runtime_state_removes_related_state_and_counts_once():
     assert session_key not in str(app[DIAGNOSTICS_KEY]["cleanup_history"])
     assert app[DIAGNOSTICS_KEY]["cleanup_history"][-1]["session_key_hash"]
 
-    assert cleanup_runtime_state(app, now=9999.0).session_keys == ()
+    assert cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), now=9999.0).session_keys == ()
     assert app[METRICS_KEY].sessions_collected == 1
     assert app[METRICS_KEY].flush_controllers_collected == 1
 
@@ -2386,7 +2386,7 @@ async def test_cleanup_reassigned_alias_keeps_new_session_routable():
             return super().items()
 
     app[SESSION_ALIASES_KEY] = ReassignedAliases()
-    cleanup_runtime_state(app, now=3700.0)
+    cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), now=3700.0)
 
     assert old_key not in app[SESSIONS_KEY]
     assert app[SESSION_ALIASES_KEY]["om_reply"] == new_key
@@ -2455,7 +2455,7 @@ async def test_cleanup_runtime_state_keeps_active_interactions_and_inflight_alia
     )
 
     try:
-        result = cleanup_runtime_state(app, now=5000.0)
+        result = cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), now=5000.0)
     finally:
         alias_lock.release()
 
@@ -2479,7 +2479,7 @@ def test_cleanup_history_is_hashed_and_bounded_to_fifty_entries():
         session.updated_at = 0.0
         app[SESSIONS_KEY][session_key] = session
 
-    result = cleanup_runtime_state(app, now=3600.0)
+    result = cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), now=3600.0)
 
     history = app[DIAGNOSTICS_KEY]["cleanup_history"]
     assert len(result.session_keys) == 55
@@ -2496,7 +2496,7 @@ def test_closed_controller_cleanup_requires_same_instance():
     old.close()
     app[FLUSH_CONTROLLERS_KEY][session_key] = replacement
 
-    assert not cleanup_closed_controller(app, session_key, old, now=100.0)
+    assert not cleanup_closed_controller(sidecar_server._cleanup_state_for_app(app), session_key, old, now=100.0)
     assert app[FLUSH_CONTROLLERS_KEY][session_key] is replacement
     assert app[METRICS_KEY].flush_controllers_collected == 0
 
@@ -2508,13 +2508,13 @@ def test_orphan_message_lock_cleanup_requires_same_instance_and_no_users():
     replacement = SimpleNamespace(locked=lambda: False)
     app[MESSAGE_LOCKS_KEY][lock_key] = replacement
 
-    assert not cleanup_orphan_message_lock(app, lock_key, old)
+    assert not cleanup_orphan_message_lock(sidecar_server._cleanup_state_for_app(app), lock_key, old)
     app[MESSAGE_LOCK_USERS_KEY][lock_key] = 1
-    assert not cleanup_orphan_message_lock(app, lock_key, replacement)
+    assert not cleanup_orphan_message_lock(sidecar_server._cleanup_state_for_app(app), lock_key, replacement)
     assert app[MESSAGE_LOCKS_KEY][lock_key] is replacement
 
     app[MESSAGE_LOCK_USERS_KEY].pop(lock_key)
-    assert cleanup_orphan_message_lock(app, lock_key, replacement)
+    assert cleanup_orphan_message_lock(sidecar_server._cleanup_state_for_app(app), lock_key, replacement)
     assert lock_key not in app[MESSAGE_LOCKS_KEY]
 
 
@@ -7606,7 +7606,7 @@ async def test_cleanup_does_not_remove_committed_handoff_deduplication(client):
     )
     update_count = len(feishu_client.updated)
     session = next(iter(test_client.app[SESSIONS_KEY].values()))
-    cleanup_runtime_state(test_client.app, now=session.updated_at + 3601)
+    cleanup_runtime_state(sidecar_server._cleanup_state_for_app(test_client.app), now=session.updated_at + 3601)
     assert test_client.app[SESSIONS_KEY] == {}
 
     duplicate = await test_client.post(
@@ -12360,7 +12360,7 @@ async def test_repeated_failed_messages_do_not_retain_runtime_state(
                 assert retained.active_interaction is None
                 assert app[FEISHU_MESSAGE_IDS_KEY][key] == f"om_card_{index}"
             assert app[INTERACTION_RESULTS_KEY] == {}
-            cleanup_runtime_state(app, time.time() + 3601)
+            cleanup_runtime_state(sidecar_server._cleanup_state_for_app(app), time.time() + 3601)
 
         assert app[SESSIONS_KEY] == {}
         assert app[SESSION_ALIASES_KEY] == {}
@@ -14574,3 +14574,28 @@ async def test_interaction_placement_matches_state_and_actual_send(client, runti
         assert len(feishu_client.sent) == 2
     finally:
         listener.close()
+
+
+def test_cleanup_state_adapter_borrows_each_live_app_registry():
+    from dataclasses import fields
+
+    app = create_app(FakeFeishuClient())
+    state = sidecar_server._cleanup_state_for_app(app)
+    keys = {
+        "sessions": SESSIONS_KEY, "aliases": SESSION_ALIASES_KEY,
+        "message_locks": MESSAGE_LOCKS_KEY, "lock_users": MESSAGE_LOCK_USERS_KEY,
+        "controllers": FLUSH_CONTROLLERS_KEY, "message_ids": FEISHU_MESSAGE_IDS_KEY,
+        "bot_ids": MESSAGE_BOT_IDS_KEY, "card_configs": SESSION_CARD_CONFIGS_KEY,
+        "summary_owners": CARD_SUMMARY_SESSION_KEYS_KEY, "summaries": CARD_SUMMARIES_KEY,
+        "interaction_owners": INTERACTION_RESULT_SESSION_KEYS_KEY,
+        "interaction_results": INTERACTION_RESULTS_KEY,
+        "metrics": METRICS_KEY, "diagnostics": DIAGNOSTICS_KEY,
+    }
+    assert set(keys) == {field.name for field in fields(state)}
+    for name, key in keys.items():
+        assert getattr(state, name) is app[key]
+    replacement = {}
+    app[SESSION_ALIASES_KEY] = replacement
+    refreshed = sidecar_server._cleanup_state_for_app(app)
+    assert refreshed.aliases is replacement
+    assert state.aliases is not replacement

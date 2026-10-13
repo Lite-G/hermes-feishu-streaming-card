@@ -420,3 +420,13 @@ def test_maintenance_evidence_change_selects_proof_and_cross_layer_stop_contract
         "tests/unit/test_runtime_ownership.py",
         "tests/integration/test_maintenance_runner.py",
     } <= set(targets)
+
+
+def test_lifecycle_state_change_selects_server_and_flush_consumers():
+    targets, groups, unknown = preflight.select_targets(
+        ["hermes_feishu_card/lifecycle.py"], []
+    )
+    assert not unknown
+    assert set(groups) == {"process", "runtime", "render"}
+    assert {"tests/unit/test_lifecycle.py", "tests/unit/test_flush.py",
+            "tests/integration/test_server.py"} <= set(targets)
