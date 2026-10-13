@@ -312,7 +312,7 @@ def test_atomic_write_temp_cleanup_stays_bound_to_staging_parent(
     target = parent / "target.txt"
     target.write_text("before\n", encoding="utf-8")
     real_parent = tmp_path / "managed-real"
-    original_replace = cli.os.replace
+    original_replace = posix_transaction.os.replace
     decoy = None
 
     def replace_parent_before_temp_replace(source, destination, *args, **kwargs):
@@ -330,7 +330,7 @@ def test_atomic_write_temp_cleanup_stays_bound_to_staging_parent(
             (parent / target.name).write_text("USER-TARGET\n", encoding="utf-8")
         return original_replace(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(cli.os, "replace", replace_parent_before_temp_replace)
+    monkeypatch.setattr(posix_transaction.os, "replace", replace_parent_before_temp_replace)
 
     with pytest.raises(ValueError, match="directory changed during write"):
         posix_transaction._atomic_write_text(target, "after\n")
@@ -382,7 +382,7 @@ def test_restore_transaction_absent_rollback_unlink_stays_bound_to_parent(
     failing.write_text("before\n", encoding="utf-8")
     real_parent = tmp_path / "managed-real"
     original_atomic_write = posix_transaction._atomic_write_text
-    original_unlink = cli.os.unlink
+    original_unlink = posix_transaction.os.unlink
     injected = False
 
     def fail_second_write(path, contents, **kwargs):
@@ -401,7 +401,7 @@ def test_restore_transaction_absent_rollback_unlink_stays_bound_to_parent(
         return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_second_write)
-    monkeypatch.setattr(cli.os, "unlink", swap_parent_at_rollback_unlink)
+    monkeypatch.setattr(posix_transaction.os, "unlink", swap_parent_at_rollback_unlink)
 
     with pytest.raises(OSError, match="second target unavailable"):
         posix_transaction._write_targets_transactionally(
@@ -486,7 +486,7 @@ def test_portable_existing_write_does_not_use_unbound_replace(
         replace_called = True
         raise AssertionError("portable existing write must stay on the bound handle")
 
-    monkeypatch.setattr(cli.os, "replace", unexpected_replace)
+    monkeypatch.setattr(file_transaction.os, "replace", unexpected_replace)
 
     file_transaction._atomic_write_text_portable(target, "after\n")
 
@@ -509,7 +509,7 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
     injected = []
 
     if failure_stage == "short_write":
-        original_write = cli.os.write
+        original_write = file_transaction.os.write
         write_calls = 0
 
         def fail_after_short_write(fd, payload):
@@ -522,9 +522,9 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
                 raise OSError("simulated write failure")
             return original_write(fd, payload)
 
-        monkeypatch.setattr(cli.os, "write", fail_after_short_write)
+        monkeypatch.setattr(file_transaction.os, "write", fail_after_short_write)
     elif failure_stage == "ftruncate":
-        original_ftruncate = cli.os.ftruncate
+        original_ftruncate = file_transaction.os.ftruncate
         truncate_calls = 0
 
         def fail_first_truncate(fd, length):
@@ -535,9 +535,9 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
                 raise OSError("simulated truncate failure")
             return original_ftruncate(fd, length)
 
-        monkeypatch.setattr(cli.os, "ftruncate", fail_first_truncate)
+        monkeypatch.setattr(file_transaction.os, "ftruncate", fail_first_truncate)
     elif failure_stage == "fsync":
-        original_fsync = cli.os.fsync
+        original_fsync = file_transaction.os.fsync
         fsync_calls = 0
 
         def fail_first_fsync(fd):
@@ -548,7 +548,7 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
                 raise OSError("simulated fsync failure")
             return original_fsync(fd)
 
-        monkeypatch.setattr(cli.os, "fsync", fail_first_fsync)
+        monkeypatch.setattr(file_transaction.os, "fsync", fail_first_fsync)
     else:
         original_verify = file_transaction._verify_portable_exclusive_bytes
         verify_calls = 0
@@ -2584,7 +2584,7 @@ def test_restore_cleanup_unlink_stays_bound_when_parent_swaps_at_syscall(
     evidence = backup_path(hermes_dir)
     parent = evidence.parent
     real_parent = parent.with_name("gateway-real")
-    original_unlink = cli.os.unlink
+    original_unlink = posix_transaction.os.unlink
     injected = False
 
     def swap_parent_at_evidence_unlink(path, *args, **kwargs):
@@ -2597,7 +2597,7 @@ def test_restore_cleanup_unlink_stays_bound_when_parent_swaps_at_syscall(
             injected = True
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(cli.os, "unlink", swap_parent_at_evidence_unlink)
+    monkeypatch.setattr(posix_transaction.os, "unlink", swap_parent_at_evidence_unlink)
 
     runner = cli._run_restore if command == "restore" else cli._run_uninstall
     result = runner(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -3387,7 +3387,7 @@ def test_install_rollback_unlink_stays_bound_when_parent_swaps_at_syscall(
     parent = evidence.parent
     real_parent = parent.with_name("gateway-real")
     original_atomic_write = posix_transaction._atomic_write_text
-    original_unlink = cli.os.unlink
+    original_unlink = posix_transaction.os.unlink
     injected = False
 
     def fail_run_write(path, contents, **kwargs):
@@ -3406,7 +3406,7 @@ def test_install_rollback_unlink_stays_bound_when_parent_swaps_at_syscall(
         return original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_run_write)
-    monkeypatch.setattr(cli.os, "unlink", swap_parent_at_evidence_unlink)
+    monkeypatch.setattr(posix_transaction.os, "unlink", swap_parent_at_evidence_unlink)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 

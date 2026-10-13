@@ -430,3 +430,14 @@ def test_lifecycle_state_change_selects_server_and_flush_consumers():
     assert set(groups) == {"process", "runtime", "render"}
     assert {"tests/unit/test_lifecycle.py", "tests/unit/test_flush.py",
             "tests/integration/test_server.py"} <= set(targets)
+
+
+def test_shared_bound_io_change_selects_all_three_transaction_consumers():
+    targets, groups, unknown = preflight.select_targets(
+        ["hermes_feishu_card/install/posix_transaction.py"], []
+    )
+    assert not unknown
+    assert set(groups) == {"install_transactions", "install", "diagnostics"}
+    assert {"tests/unit/test_bound_recovery_io.py", "tests/unit/test_recovery.py", "tests/unit/test_integrity.py",
+            "tests/integration/test_cli_install.py",
+            "tests/integration/test_cli_integrity.py"} <= set(targets)
