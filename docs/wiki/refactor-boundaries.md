@@ -18,6 +18,7 @@
 | 只读 CLI 格式化与本地诊断导出 | `cli_reports`、`support_report` | CLI 执行诊断并决定退出码；报告默认不上传 |
 | 已加载阅读默认值与下次加载比较 | `config_snapshot` | process 验证现有受管进程，server 只读取 factory 已加载值 |
 | 解释器路径身份 | `runtime_ownership.python_executable_identity` | server、CLI、runner、maintenance 共用同一算法 |
+| Gateway stale-result 来源契约 | `install/gateway_contracts` | patcher 保留 handler 发现、marker 校验/移除与 owned-block render/apply；契约只返回已验证位置，未知绑定按原错误拒绝 |
 | Base delivery 源码家族验证 | `install/base_contracts`、`install/ast_contracts` | patcher 传入原 renderer 生成的 owned blocks，再按原事务应用 |
 | portable 安装文件事务与 evidence | `install/file_transaction` | CLI 与 decomposed installer 共用；自动恢复仍要求原有更强目录绑定 |
 | POSIX 目录句柄、原子写入、事务回滚及已验证证据删除 | `install/posix_transaction` | CLI 选择安装/恢复计划并传入原有 pre-commit/validate callbacks；底层模块不导入 CLI |

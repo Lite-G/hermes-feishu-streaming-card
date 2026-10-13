@@ -92,6 +92,8 @@
 
 ### `hermes_feishu_card/install/patcher.py`
 
+Gateway stale-result 的 AST 来源绑定判断在 `install/gateway_contracts.py`。handler 发现、marker、生成与写回仍由 patcher 管理；不得借提取放宽唯一 guard、同块赋值、原 source/pinned tuple 及禁止重赋值的条件。
+
 职责：
 
 - 唯一允许修改 Hermes `gateway/run.py` 的代码。
