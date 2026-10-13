@@ -1573,8 +1573,6 @@ def _safe_health(fetch: HealthFetcher) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-
-
 def _wait_for_drain(
     fetch: HealthFetcher,
     *,

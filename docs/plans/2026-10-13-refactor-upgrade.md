@@ -322,3 +322,7 @@ T06 的 ee039e8 继续隔离前置 callback 拒绝分类、runtime/窗口双时�
 T05 的 `ec3d557` 提取交互容量预检，保留 copy/new → apply → render 的顺序；配置读取、锁、指标与实际状态提交仍在 server。独立验收正在补齐拒绝后不注册会话、不修改原 owner/sequence、重复事件不渲染与副本隔离的证据，当前不计作已验收。
 
 后续证据更新：H `adb3486` 与 I `6de9843` 的云端 tests/CodeQL 已全部通过，原生 Python 3.9/3.10 各为 H 5416 passed / 35 skipped、I 5473 passed / 35 skipped。L `472c2fc` 普通 wheel 的 122 个资源与源码、实际安装一致，SHA256 为 `4d4013523f443931a2c1a6bf4978ee5e14d6ca52a86b69eedcb741abfd451a95`；外部 `-I` 验证规则/server20项与真实HTTP5项。沿用 K 的 synthetic fixture CLI 验证仅限未变资源；完整 fixed Hermes checkout 因缺少可验证 runtime Python 未通过真实安装，未绕过门禁。客户端验收仍未完成。
+
+T05 交互预检的独立验收已完成：22 项定向测试（15 个新增规则、7 个 HTTP）及 docs/metadata102项通过，针对性 Ruff/mypy 和三种新进程导入顺序通过。首次失败来自测试误用 deepcopy 对象等值，修正为完整存储内容对比后通过，产品代码未为此变更；真实 Python3.9运行、普通包及客户端尚未覆盖此切口。Draft #405 保留该范围。
+
+T14 的 `904d314` 将维护排空健康校验和连续心跳证明迁入 `maintenance_evidence`。轮询、deadline、lease、锁和实际停服保留原编排；聚合 owner 数据仍归 `runtime_ownership`。本次保留原字段校验、30秒新鲜度、同owner递增和无效/忙碌重置语义，独立验收进行中；未实现多Gateway协同维护，也未改生产。

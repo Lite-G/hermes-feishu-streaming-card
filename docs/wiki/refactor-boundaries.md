@@ -23,6 +23,7 @@
 | Base delivery 源码家族验证 | `install/base_contracts`、`install/ast_contracts` | patcher 传入原 renderer 生成的 owned blocks，再按原事务应用 |
 | portable 安装文件事务与 evidence | `install/file_transaction` | CLI 与 decomposed installer 共用；自动恢复仍要求原有更强目录绑定 |
 | POSIX 目录句柄、原子写入、事务回滚及已验证证据删除 | `install/posix_transaction` | CLI 选择安装/恢复计划并传入原有 pre-commit/validate callbacks；底层模块不导入 CLI |
+| 维护排空证据与连续空闲心跳 | `maintenance_evidence` | 原维护编排保留轮询、时间、锁、lease 与停服；每 sender 数据仍由 runtime_ownership 管理 |
 | 受理事件观测耗时 | `observations` | session 只记录已接受事件；checkpoint 不恢复计时；不推导模型速率 |
 
 ## 兼容名称与清退条件
@@ -58,3 +59,5 @@ native admission 的有 generation fence 与终态去重仍先于 policy；无 g
 resolver 按原 2 秒预算读取完整响应，最多缓存 513 字节；未到 EOF 的合法 JSON 前缀不作为成功回执。失败统计由调用方每次请求记录一次，连接清理异常不会重复计数。
 
 交互容量预检由 `interaction_rules.interaction_preflight_rejection` 持有：仅对交互请求复制原会话或创建未注册的预演会话，按原 sequence 规则 apply，再调用注入的展示函数。重复事件不渲染；非 card 结果拒绝接管。server 保留配置读取、原锁、拒绝指标、HTTP 响应及后续实际 apply，预演对象从不成为真实 owner。
+
+`DrainEvidence` 只保存已验证的 owner、sequence 和活跃数量，`DrainProof` 只保留上一个有效空闲样本；无效或忙碌样本清空证明，同 owner 严格递增才能放行。重复或倒序样本沿用原先“替换前一样本”的语义，不增加最大序号策略。多个 live Gateway 的 conflict 仍拒绝维护，不代表已实现跨 Gateway 协同更新。
