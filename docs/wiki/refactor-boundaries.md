@@ -9,7 +9,7 @@
 | native terminal admission、重复终态与持久 fence 衔接 | `native_admission` | 只依赖原始事件、owner 快照与四方法 store port；server 保留 policy、cache 提交、HTTP/指标与 repair 调度 |
 | 原 Hermes resolver 的单次认证 HTTP 请求 | `interaction_resolver` | server 在原锁内验证 owner、锁外请求、重新入锁校验对象/token/descriptor，再应用结果；指标与 HTTP 回执仍由 server 管理 |
 | 选择值与表单解析 | `interaction_input` | server/SDK 继续负责身份、过期、claim 和原 Hermes resolver |
-| 过期审批窗口资格、resolver 返回后的原 owner 校验 | `interaction_rules` | server 在原锁内捕获不可变请求快照，网络返回后重新加锁验证对象/token/chat/descriptor；expire 与状态提交仍在原 owner，重展不执行 resolver |
+| 回调拒绝分类、双时限、文本回退请求资格、审批窗口及返回后原 owner 校验 | `interaction_rules` | server 在原锁内读取 owner、执行 expiry/状态提交；身份拒绝先于投递占位，模式解析保持短路，网络返回后重新加锁校验冻结身份；重展不执行 resolver |
 | 辅助交互回执的只读投影 | `interaction_receipts` | server 选择已加载配置、实际 owner/dialect，负责保存和投递；纯投影保留原内容，剥离操作/token，超限拒绝而不截断授权范围 |
 | task 状态投影、颜色语义 | `card_view` | `presentation` 修改已知显示字段；不改执行或授权状态 |
 | 正文的完整来源与显示表示 | `content_plan`、`native_tables`、`text` | renderer 组合卡片并由共享 serializer 裁决最终容量 |

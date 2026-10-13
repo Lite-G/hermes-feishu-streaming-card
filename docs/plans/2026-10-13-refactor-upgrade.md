@@ -316,3 +316,5 @@ T15 的 `5e3b9d8` 将 Gateway stale-result 完整来源契约迁入 `install/gat
 Gateway 来源契约独立 218 项定向通过；另 143 项通过、7 项缺失 fixture 跳过，当前 latest 固定来源的实际安装/重复安装/doctor/逐字恢复与 ledger 检查通过。21 模块 mypy 与 Ruff 通过，核心 18 条 AST 判断自动对照等价（仅旧 no-op return content 规范化为纯定位器 return None）。`ec25e85` 继续把 cron 定位和共用正文/docstring helper 归到唯一所有者，保留原优先级与拒绝边界；这一后续提交单独验收，不以 Gateway 结果代签。
 
 Cron 后续独立 387 项通过，覆盖新定位规则、完整 patcher/decomposed 及文档；最终 6137f45 的 docs/metadata/preflight133项与 Ruff/mypy22模块通过。首次 mypy 的 AST 类型收窄错误及仅 typing.cast 的修复保留；未改变匹配规则。当前完整源码家族整理仍不止这些接点，普通 wheel 与最终 CI 需覆盖 Gateway/Cron 新模块后才能进入发行判断。
+
+T06 的 ee039e8 继续隔离前置 callback 拒绝分类、runtime/窗口双时限以及两个文本回退请求谓词。原 session 对象/id/token/chat 先于投递占位，exact int/float deadline 仍拒绝 bool 替代值；过期 mutation、profile 检查和 HTTP 优先级保持原位。716276e 的独立测试覆盖 31 个新规则与既有实际 HTTP，共77项通过，Ruff/mypy22模块通过；已与普通mode lookup短路和dict subclass差异对照。新普通包与最终CI仍需绑定该运行版本，真实点击尚未验。
