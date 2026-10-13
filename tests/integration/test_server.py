@@ -14300,6 +14300,8 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
 
     release = asyncio.Event()
     release.set()
+    consume_final = asyncio.Event()
+    completion_waiter = None
     entered = set()
     deliveries = []
     active_updates = 0
@@ -14338,6 +14340,8 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
                     ) as response:
                         assert response.status == 200
                         await response.json()
+                    if f"FINAL_{prefix}" in str(card):
+                        await consume_final.wait()
                     self.updated.append((message_id, card))
 
             feishu = SlowHTTPClient()
@@ -14418,14 +14422,27 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
                 assert len(background) <= 3 * session_count
                 assert len(set(background)) == len(background)
                 release.set()
+                async def wait_for_client_completion():
+                    deadline = asyncio.get_running_loop().time() + 5
+                    while asyncio.get_running_loop().time() < deadline:
+                        if all(f"FINAL_{prefix}{i}_END" in str(feishu.updated) for i in range(session_count)):
+                            return
+                        await asyncio.sleep(0.005)
+                    raise AssertionError("client did not consume every terminal response")
+
+                completion_waiter = asyncio.create_task(wait_for_client_completion())
                 deadline = asyncio.get_running_loop().time() + 5
                 while asyncio.get_running_loop().time() < deadline:
-                    # Server receipt precedes the client consuming its response.
-                    # Observe completion at the same boundary used below.
-                    if all(f"FINAL_{prefix}{i}_END" in str(feishu.updated) for i in range(session_count)):
+                    if all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count)):
                         break
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0.005)
                 assert all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count))
+                # Force server receipt to precede client completion. The old
+                # server-only predicate returns here and fails this assertion.
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(completion_waiter), 0.02)
+                consume_final.set()
+                await asyncio.wait_for(completion_waiter, 5)
                 for i in range(session_count):
                     own = [message for message, card in feishu.updated if f"FINAL_{prefix}{i}_END" in str(card)]
                     assert own
@@ -14442,6 +14459,10 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
                 record_property("peak_active_downstream", peak_updates)
                 record_property("display_tasks_at_terminal", len(background))
             finally:
+                consume_final.set()
+                if completion_waiter is not None and not completion_waiter.done():
+                    completion_waiter.cancel()
+                    await asyncio.gather(completion_waiter, return_exceptions=True)
                 release.set()
                 background = [controller._task for controller in app[FLUSH_CONTROLLERS_KEY].values()
                               if controller._task and not controller._task.done()]
