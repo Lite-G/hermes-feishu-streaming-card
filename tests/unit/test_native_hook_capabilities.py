@@ -452,18 +452,21 @@ def test_real_regular_wheel_plugin_manager_probe_reports_exactly_four_capabiliti
         "stable_tool_lifecycle",
         "approval_observe",
     }
-    assert result["reason_code"] == "verified", {
-        "reason_code": (
-            result["reason_code"]
-            if result["reason_code"] in native_hooks._REASON_CODES else "unavailable"
-        ),
-        "source_commit": (
-            result["source_commit"]
-            if re.fullmatch(r"[0-9a-f]{40}", str(result.get("source_commit", "")))
-            else "unavailable"
-        ),
-        "source_probe_failures": result["source_probe_failures"],
-    }
+    if result["reason_code"] != "verified":
+        reason = result["reason_code"]
+        source_commit = result.get("source_commit")
+        # Avoid pytest assert rewriting appending the unfiltered child value.
+        raise AssertionError({
+            "reason_code": (
+                reason if isinstance(reason, str) and reason in native_hooks._REASON_CODES
+                else "unavailable"
+            ),
+            "source_commit": (
+                source_commit if isinstance(source_commit, str)
+                and re.fullmatch(r"[0-9a-f]{40}", source_commit) else "unavailable"
+            ),
+            "source_probe_failures": result["source_probe_failures"],
+        })
     assert set(result["available"]) == expected
     assert result["plugin_evidence_sha256"].startswith("sha256:")
     assert len(result["source_digests"]) == 9
