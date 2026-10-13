@@ -308,3 +308,5 @@ T05 完整事件编排、T06 其余回执与身份分层、T07/T08 剩余职责�
 后续 `8be6f56` 已独立通过纯规则与受控 server 竞态共 37 项、Ruff 和 19 模块 mypy；新增测试随 `9bec395` 进入实施分支。实际 claim 仍由 Hermes 原 runtime 的锁和 consumed 状态负责，侧车的快照只决定已返回结果是否仍属于原显示窗口。`be8999f` 再将辅助回执复制、脱敏、去按钮及容量检查提为不依赖 app/网络的投影；server 保留原配置/方言选择、检查点保存和投递，独立验收进行中。
 
 第三切口 `be8999f` 独立新投影与 checkpoint/recovery/fallback 共 52 项通过；`474f95f` 增强容量故障注入后，新投影 15 项与 docs/metadata/preflight 合计 148 项通过，Ruff 与 20 模块 mypy 通过。两批有重叠，不累计为不同案例。相关普通 wheel 与最终云端全量仍需绑定新候选，不能沿用 G 的旧运行资源证明。
+
+T05 的 `75dea4b` 将交互回复位置统一为不可变三元决策，保留 sticky IM anchor、event、session fallback 的优先级。`8df6642` 独立新增规则/实际 HTTP 与既有轨迹共 17 项通过，完整 event_rules32项通过（两批重叠）；runtime发送仍在锁外，direct发送仍在原锁内。该切口并入同一交互 Draft #402，保留各独立提交，不把它标为完整事件协调已结束。

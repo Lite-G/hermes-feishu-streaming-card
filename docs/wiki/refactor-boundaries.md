@@ -5,7 +5,7 @@
 | 职责 | 实现所有者 | 调用方保留什么 |
 | --- | --- | --- |
 | 终态 PATCH、有限重试、一次补发的顺序 | `terminal_delivery`；结果类型在 `delivery` | server 冻结目标，注入 I/O，核对 generation 后提交回执/通知/检查点 |
-| 事件路由、reply alias、独立通知归属 | `event_rules` | server 在原锁域读取状态并写入 alias；纯规则只返回键或变更计划 |
+| 事件路由、reply alias、独立通知归属及交互回复位置 | `event_rules` | server 在原锁域读取状态并写入 alias；交互状态、runtime reservation 与直接发卡复用一次 thread/anchor 决策，纯规则不发送消息 |
 | native terminal admission、重复终态与持久 fence 衔接 | `native_admission` | 只依赖原始事件、owner 快照与四方法 store port；server 保留 policy、cache 提交、HTTP/指标与 repair 调度 |
 | 原 Hermes resolver 的单次认证 HTTP 请求 | `interaction_resolver` | server 在原锁内验证 owner、锁外请求、重新入锁校验对象/token/descriptor，再应用结果；指标与 HTTP 回执仍由 server 管理 |
 | 选择值与表单解析 | `interaction_input` | server/SDK 继续负责身份、过期、claim 和原 Hermes resolver |
