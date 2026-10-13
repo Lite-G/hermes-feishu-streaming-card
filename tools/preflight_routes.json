@@ -122,7 +122,8 @@
       "tests/unit/test_maintenance_store.py",
       "tests/unit/test_maintenance_card.py",
       "tests/unit/test_maintenance_process.py",
-      "tests/integration/test_maintenance_runner.py"
+      "tests/integration/test_maintenance_runner.py",
+      "tests/unit/test_maintenance_evidence.py"
     ],
     "plugin": [
       "tests/unit/test_hermes_plugin.py",
