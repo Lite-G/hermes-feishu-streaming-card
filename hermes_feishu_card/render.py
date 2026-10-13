@@ -23,11 +23,12 @@ from .session import (
 )
 from .status import StatusConfig, resolve_display_status
 from .subscription_usage import uses_codex_subscription
+from .card_view import TASK_TEXT_SIZE_DEFAULTS, task_presentation
 from .presentation import (
-    apply_task_presentation, task_presentation, task_interaction_prompt,
-    task_button_label, task_answer_code_projection, TASK_TEXT_SIZE_DEFAULTS,
+    apply_task_presentation, task_interaction_prompt,
+    task_button_label, task_answer_code_projection,
 )
-from .native_tables import build_main_content_elements
+from .content_plan import plan_main_content, render_content_plan
 from .text import (
     TableOverflowResult,
     normalize_stream_text,
@@ -1229,32 +1230,12 @@ def _render_main_content_elements(
     table_overflow_mode: str = "compact",
     native_tables: bool = False,
 ) -> list[Dict[str, Any]]:
-    """Render the body, optionally as native card tables plus Markdown.
-
-    ``native_tables`` swaps body Markdown tables for the card's native ``table``
-    element (see :mod:`hermes_feishu_card.native_tables`); when no table can be
-    converted the Markdown layout below is used unchanged.
-    """
-    main_text = transform_table_overflow(
-        main_text,
-        mode=table_overflow_mode,
-    ).text
-    if native_tables:
-        native_elements = build_main_content_elements(
-            main_text,
-            chunk_chars=MAIN_CONTENT_CHUNK_CHARS,
-            text_size=text_size,
-        )
-        if native_elements is not None:
-            return native_elements
-    chunks = split_markdown_blocks(main_text, MAIN_CONTENT_CHUNK_CHARS)
-    elements = []
-    for index, chunk in enumerate(chunks):
-        element_id = "main_content" if index == 0 else f"main_content_{index}"
-        element = {"tag": "markdown", "element_id": element_id, "content": chunk}
-        _set_text_size(element, text_size)
-        elements.append(element)
-    return elements
+    """Render a complete body projection; final admission is whole-card based."""
+    plan = plan_main_content(
+        main_text, table_overflow_mode=table_overflow_mode,
+        native_tables=native_tables, chunk_chars=MAIN_CONTENT_CHUNK_CHARS,
+    )
+    return render_content_plan(plan, text_size=text_size)
 
 
 def _interaction_mention_content(

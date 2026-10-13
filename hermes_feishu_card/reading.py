@@ -44,7 +44,7 @@ READING_PRESETS = {
         "stream_thinking_to_body": False,
         "hide_completed_tool_activity": False,
         "reasoning_format": "panel",
-        "timeline_expanded": False,
+        "timeline_expanded": True,
         HIDE_SUCCESSFUL_TOOL_ACTIVITY: True,
     },
 }

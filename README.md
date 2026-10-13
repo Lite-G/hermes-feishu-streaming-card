@@ -17,6 +17,8 @@
 
 **发行版本：[v4.7.7](https://github.com/baileyh8/hermes-feishu-streaming-card/releases/tag/v4.7.7)。** 可选原生表格；长单元格完整回退 Markdown，超长表头不再丢失。见[发行说明](docs/release-notes-v4.7.7.md)。
 
+本开发分支正在验收新版任务布局、已加载配置对照、精简 YAML 和本地脱敏报告，尚未发布。范围与证据见[重构升级记录](docs/plans/2026-10-13-refactor-upgrade.md)。
+
 ## 为什么使用 HFC
 
 | 你关心的事 | 卡片里的体验 |
@@ -156,11 +158,13 @@ card:
 | 缺省 / `classic` | 保持现有展示方式，过程面板折叠 |
 | `focused` | 重点看答案；思考放在面板，正常完成后精简成功工具行 |
 | `detailed` | 展开思考与工具过程，便于追踪任务 |
-| `task`（4.7.0） | 状态和动作集中展示，正文优先，过程折叠，统计简洁 |
+| `task`（4.7.0 起） | 状态和动作分区、正文优先；本开发分支过程默认展开，完成后保留历史 |
 
 4.7.0 新增可选 `task` 布局与九种状态的离线预览。启用方式、配置来源和回退见[任务卡片](docs/task-cards.md)。订阅周额度仅在实际使用 `openai-codex` 的 GPT 回合显示，其他模型或来源不明时隐藏。
 
 同层显式字段优先于预设。若从完整示例复制了旧显示开关，预设可能被覆盖；用 `hermes-feishu-card card-config --config <配置路径>` 检查有效值，重启 sidecar 后生效。更多选项见[阅读预设](docs/wiki/reading-presets.md)。
+
+开发分支还可追加 `--running` 核对进程已加载值，或用 `--minimal-yaml` 生成所选层的精简阅读片段。排障时先用 [`doctor --support-report`](docs/wiki/local-support-report.md) 预览脱敏报告；这些命令不会自动改配置或重启。
 
 | 想调整什么 | 配置 / 文档 |
 | --- | --- |

@@ -23,6 +23,8 @@ Use it when connecting [Hermes Agent](https://github.com/NousResearch/hermes-age
 
 **Release version: [v4.7.7](https://github.com/baileyh8/hermes-feishu-streaming-card/releases/tag/v4.7.7).** Opt-in native tables with lossless Markdown fallback for long cells and headers. See [release notes](docs/release-notes-v4.7.7.en.md).
 
+This development branch is validating an updated task layout, loaded-configuration comparisons, minimal reading YAML and local support reports. These changes are not released; see the [implementation and acceptance record](docs/plans/2026-10-13-refactor-upgrade.md).
+
 ## Why HFC
 
 | What matters | What you get |
@@ -162,11 +164,13 @@ card:
 | Omitted / `classic` | Existing behavior with a collapsed process panel |
 | `focused` | Emphasize the answer; reasoning stays in the panel and successful tool rows are reduced after normal completion |
 | `detailed` | Expand reasoning and tools to follow the task |
-| `task` (4.7.0) | Clear state and activity, answer-first reading, folded process details and compact metrics |
+| `task` (since 4.7.0) | Separate state and activity with answer-first reading; this development branch expands process details and retains completed history |
 
 4.7.0 adds an optional `task` layout and an offline preview of nine states. See [task cards](docs/task-cards.md#english-quick-reference) for setup, configuration sources and rollback. Subscription quota appears only on GPT turns attributed to `openai-codex`; unrelated or unknown routes omit it.
 
 Explicit fields at the same level override presets. Copying all existing display switches may override your preset; inspect effective values with `hermes-feishu-card card-config --config <config-path>` and restart the sidecar to apply changes. See [reading presets](docs/wiki/reading-presets.md).
+
+On this development branch, add `--running` to verify loaded defaults, or use `--minimal-yaml` to print a compact reading-field replacement for the selected scope. Preview a redacted local report with [`doctor --support-report`](docs/wiki/local-support-report.md). These commands do not edit configuration or restart services.
 
 | Change | Setting / reference |
 | --- | --- |

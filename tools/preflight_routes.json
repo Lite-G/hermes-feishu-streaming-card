@@ -15,6 +15,7 @@
       "tests/unit/test_status.py",
       "tests/unit/test_process_activity.py",
       "tests/unit/test_timeline_reading.py",
+      "tests/unit/test_content_plan.py",
       "tests/unit/test_observations.py"
     ],
     "config": [
@@ -455,6 +456,11 @@
       "process",
       "runtime",
       "loaded_config"
+    ],
+    "hermes_feishu_card/content_plan.py": [
+      "render",
+      "appearance",
+      "delivery"
     ],
     "hermes_feishu_card/install/ast_contracts.py": [
       "install"

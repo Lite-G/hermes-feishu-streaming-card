@@ -39,19 +39,26 @@ approval queue or execution-recovery engine here.
 The current stack is Python + asyncio/aiohttp, PyYAML, dataclasses/manual boundary
 validation, setuptools and pytest. Read the supported Python floor and package
 version from `pyproject.toml`; do not implement a proposed V5 floor implicitly.
-Hermes supplies the Feishu SDK environment. There is no configured formatter,
-linter or typechecker; do not claim their checks ran or mass-format existing code.
+Hermes supplies the Feishu SDK environment. Ruff and mypy cover the extracted
+boundaries listed in `pyproject.toml`; install the `quality` extra on Python 3.12,
+then run `python -m ruff check` and `python -m mypy`. Expand the scope with each
+extraction. Do not mass-format existing code or hide failures with blanket ignores.
+Python 3.9 runtime coverage remains separate from this development-tool runtime.
 
 | Concern | Primary code |
 | --- | --- |
 | Hermes capability/plugin/legacy adapters | `hermes_plugin*`, `hook_runtime.py`, `install/native_hooks.py` |
-| Event and interaction contracts | `events.py`, `session.py`, `runtime_interaction_transport.py` |
-| Orchestration, identity and delivery ownership | `server.py`, `native_handoff.py`, `delivery_policy.py` |
-| Presentation and payload budgets | `render.py`, `presentation.py`, `reading.py`, `render_options.py`, `card_limits.py`, `text.py` |
+| Event and interaction contracts | `events.py`, `event_rules.py`, `interaction_input.py`, `session.py`, `runtime_interaction_transport.py` |
+| Orchestration, identity and delivery ownership | `server.py`, `terminal_delivery.py`, `delivery.py`, `native_handoff.py`, `delivery_policy.py` |
+| Presentation and payload budgets | `card_view.py`, `content_plan.py`, `render.py`, `presentation.py`, `reading.py`, `render_options.py`, `card_limits.py` |
 | Feishu I/O and CardKit sequencing | `feishu_client.py`, `cardkit.py` |
 | Config, installation and safe recovery | `config.py`, `cli.py`, `install/` |
 | Process credentials and service ownership | `process.py`, `runner.py`, `persistent_service.py` |
 | Bounded display/notice persistence | `session_store.py`, `notice_lifecycle.py` |
+
+Read [implemented boundaries and compatibility names](docs/wiki/refactor-boundaries.md)
+when moving an existing helper. New internal callers import its implementation
+owner; test fault injection must target the real I/O module.
 
 Keep event normalization, state decisions, rendering and external I/O separable.
 New substantial behavior belongs in a focused module with a tested boundary,
