@@ -181,7 +181,9 @@
     "install_transactions": [
       "tests/integration/test_cli_install.py",
       "tests/unit/test_decomposed_patcher.py",
-      "tests/unit/test_install_v3_transaction.py"
+      "tests/unit/test_install_v3_transaction.py",
+      "tests/unit/test_bound_recovery_io.py",
+      "tests/unit/test_recovery.py"
     ],
     "loaded_config": [
       "tests/unit/test_config_snapshot.py",
@@ -528,7 +530,8 @@
     ],
     "hermes_feishu_card/install/posix_transaction.py": [
       "install_transactions",
-      "install"
+      "install",
+      "diagnostics"
     ],
     "tests/unit/test_message_navigation.py": [
       "client",
