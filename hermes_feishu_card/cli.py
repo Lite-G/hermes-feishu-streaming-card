@@ -4690,60 +4690,9 @@ def _clear_install_state(
         for path in paths_to_remove:
             path.unlink(missing_ok=True)
         return
-    if not posix_transaction._cli_dirfd_binding_supported():
-        raise ValueError(
-            "secure restore cleanup requires directory-relative filesystem "
-            "operations on this platform"
-        )
-    bindings: dict[Path, posix_transaction._CliTargetBinding] = {}
-    try:
-        for path in paths_to_remove:
-            if restore_directory_identities is not None:
-                _assert_restore_directory_ancestry_unchanged(
-                    path, restore_directory_identities
-                )
-            binding = posix_transaction._bind_cli_target(path)
-            bindings[path] = binding
-            expected_snapshot = restore_identities.get(path)
-            if binding.initial_snapshot != expected_snapshot:
-                raise ValueError(
-                    f"{path.name} changed during restore; refusing to clean up"
-                )
-            if restore_directory_identities is not None:
-                _assert_restore_directory_ancestry_unchanged(
-                    path, restore_directory_identities
-                )
-                expected_parent = restore_directory_identities.get(path.parent)
-                if (
-                    expected_parent is not None
-                    and binding.parent_identity != expected_parent
-                ):
-                    raise ValueError(
-                        f"{path.parent.name} directory changed during restore; "
-                        "refusing to restore"
-                    )
-        for path in paths_to_remove:
-            _safe_unlink_restore_evidence(
-                bindings[path], restore_identities.get(path)
-            )
-    finally:
-        for binding in bindings.values():
-            try:
-                binding.close()
-            except OSError:
-                pass
-
-
-def _safe_unlink_restore_evidence(
-    binding: posix_transaction._CliTargetBinding,
-    expected_snapshot: _RestoreEvidenceSnapshot | None,
-) -> None:
-    if expected_snapshot is not None:
-        posix_transaction._unlink_bound_cli_target(binding, expected_snapshot)
-    elif posix_transaction._read_bound_cli_target(binding.parent_fd, binding.basename) is not None:
-        raise ValueError(
-            f"{binding.basename} changed during restore; refusing to clean up"
-        )
+    posix_transaction._remove_verified_restore_evidence(
+        paths_to_remove, restore_identities, restore_directory_identities
+    )
 
 
 def _snapshot_transaction_write(
