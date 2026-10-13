@@ -312,3 +312,5 @@ T05 完整事件编排、T06 其余回执与身份分层、T07/T08 剩余职责�
 T05 的 `75dea4b` 将交互回复位置统一为不可变三元决策，保留 sticky IM anchor、event、session fallback 的优先级。`8df6642` 独立新增规则/实际 HTTP 与既有轨迹共 17 项通过，完整 event_rules32项通过（两批重叠）；runtime发送仍在锁外，direct发送仍在原锁内。该切口并入同一交互 Draft #402，保留各独立提交，不把它标为完整事件协调已结束。
 
 T15 的 `5e3b9d8` 将 Gateway stale-result 完整来源契约迁入 `install/gateway_contracts`：唯一 discard guard、同块 agent_result 赋值、原 `_run_agent` 关键词与精确 pinned source tuple 一起验证。patcher 仍选择 handler、校验并移除旧 marker、生成 owned block 和写回；未改旧布局 no-op 或原拒绝错误。此提交独立审查及定向验收进行中，不能据此关闭整个 Gateway/cron 来源家族工作包。
+
+Gateway 来源契约独立 218 项定向通过；另 143 项通过、7 项缺失 fixture 跳过，当前 latest 固定来源的实际安装/重复安装/doctor/逐字恢复与 ledger 检查通过。21 模块 mypy 与 Ruff 通过，核心 18 条 AST 判断自动对照等价（仅旧 no-op return content 规范化为纯定位器 return None）。`ec25e85` 继续把 cron 定位和共用正文/docstring helper 归到唯一所有者，保留原优先级与拒绝边界；这一后续提交单独验收，不以 Gateway 结果代签。
