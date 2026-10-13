@@ -478,6 +478,10 @@
       "storage",
       "diagnostics"
     ],
+    "hermes_feishu_card/interaction_resolver.py": [
+      "interaction",
+      "runtime"
+    ],
     "hermes_feishu_card/interaction_rules.py": [
       "interaction",
       "runtime"

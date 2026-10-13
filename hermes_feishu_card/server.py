@@ -19,7 +19,7 @@ import logging
 import re
 from typing import Any, Callable, Dict
 
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import web
 
 from .runtime_ownership import runtime_target_identity, python_executable_identity
 from .bots import RouteResult
@@ -92,7 +92,6 @@ from .event_auth import (
     SidecarRequestAuthenticationError,
     SidecarRequestProofVerifier,
     is_loopback_host,
-    sign_runtime_interaction_request,
 )
 from .flush import FlushController
 from .feishu_client import FeishuAPIError, build_delivery_uuid
@@ -104,6 +103,7 @@ from .lifecycle import (
 from .metrics import SidecarMetrics
 from .observations import timing_summary
 from .interaction_rules import ApprovalWindowState, approval_window_can_reopen
+from .interaction_resolver import resolve_interaction
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
     NativeTerminalSnapshot,
@@ -161,7 +161,6 @@ from .runtime_control import (
     RuntimeIntegritySupervisor,
     RuntimeProofVerifier,
 )
-from .runtime_interaction_transport import RUNTIME_INTERACTION_PATH
 from .integrity import RuntimeIntegrityCoordinator, sanitize_integrity_snapshot
 from .maintenance_card import (
     render_update_inspection_card,
@@ -255,8 +254,6 @@ RUNTIME_INTEGRITY_COORDINATOR_KEY = web.AppKey(
     "runtime_integrity_coordinator", RuntimeIntegrityCoordinator
 )
 RUNTIME_INTEGRITY_TASK_KEY = web.AppKey("runtime_integrity_task", asyncio.Task)
-RUNTIME_INTERACTION_CALLBACK_TIMEOUT_SECONDS = 2.0
-MAX_RUNTIME_INTERACTION_RESPONSE_BYTES = 512
 DELIVERY_POLICY_KEY = web.AppKey("delivery_policy", Any)
 POLICY_AUTH_VERIFIER_KEY = web.AppKey("policy_auth_verifier", PolicyProofVerifier)
 NATIVE_HANDOFF_ACK_AUTH_VERIFIER_KEY = web.AppKey(
@@ -1175,114 +1172,20 @@ async def _resolve_runtime_interaction_callback(
 ) -> bool:
     metrics: SidecarMetrics = app[METRICS_KEY]
     metrics.runtime_interaction_callback_attempts += 1
-
-    def failed(reason: str) -> bool:
-        metrics.runtime_interaction_callback_failures += 1
-        app[DIAGNOSTICS_KEY]["last_runtime_interaction_callback"] = reason
-        return False
-
-    secret = app.get(OPERATIONS_TRANSPORT_ROOT_KEY)
-    if type(secret) is not bytes or len(secret) != 32:
-        return failed("secret_unavailable")
-    if (
-        type(descriptor) is not dict
-        or set(descriptor)
-        != {
-            "protocol",
-            "runtime_id",
-            "resolve_url",
-            "interaction_key",
-            "token",
-            "expires_at",
-        }
-        or type(choice) is not str
-        or not choice.strip()
-    ):
-        return failed("invalid_descriptor")
-    expires_at = descriptor.get("expires_at")
-    if type(expires_at) not in (int, float) or time.time() >= expires_at:
-        return failed("expired_before_request")
-    body_value = {
-        "protocol": descriptor["protocol"],
-        "runtime_id": descriptor["runtime_id"],
-        "interaction_key": descriptor["interaction_key"],
-        "token": descriptor["token"],
-        "choice": choice,
-        "expires_at": expires_at,
-    }
     try:
-        body = json.dumps(
-            body_value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        headers.update(
-            sign_runtime_interaction_request(
-                secret,
-                RUNTIME_INTERACTION_PATH,
-                body,
-            )
+        outcome = await resolve_interaction(
+            app.get(OPERATIONS_TRANSPORT_ROOT_KEY), descriptor, choice,
         )
-        timeout = ClientTimeout(total=RUNTIME_INTERACTION_CALLBACK_TIMEOUT_SECONDS)
-        async with ClientSession(
-            trust_env=False,
-            timeout=timeout,
-            auto_decompress=False,
-        ) as client:
-            async with client.post(
-                descriptor["resolve_url"],
-                data=body,
-                headers=headers,
-                allow_redirects=False,
-            ) as response:
-                if response.status != 200:
-                    return failed(f"http_{response.status}")
-                lengths = response.headers.getall("Content-Length", [])
-                if len(lengths) > 1:
-                    return failed("invalid_response")
-                if lengths:
-                    try:
-                        declared = int(lengths[0])
-                    except (TypeError, ValueError):
-                        return failed("invalid_response")
-                    if not 0 <= declared <= MAX_RUNTIME_INTERACTION_RESPONSE_BYTES:
-                        return failed("invalid_response")
-                raw = await response.content.read(
-                    MAX_RUNTIME_INTERACTION_RESPONSE_BYTES + 1
-                )
     except asyncio.CancelledError:
-        failed("cancelled")
+        metrics.runtime_interaction_callback_failures += 1
+        app[DIAGNOSTICS_KEY]["last_runtime_interaction_callback"] = "cancelled"
         raise
-    except (asyncio.TimeoutError, TimeoutError):
-        return failed("timeout")
-    except Exception:
-        return failed("transport_error")
-    if len(raw) > MAX_RUNTIME_INTERACTION_RESPONSE_BYTES or time.time() >= expires_at:
-        return failed(
-            "invalid_response"
-            if len(raw) > MAX_RUNTIME_INTERACTION_RESPONSE_BYTES
-            else "expired_after_request"
-        )
-    try:
-        result = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return failed("invalid_response")
-    resolved = (
-        type(result) is dict
-        and all(type(key) is str for key in result)
-        and set(result) == {"ok", "status"}
-        and result["ok"] is True
-        and type(result["status"]) is str
-        and result["status"] == "resolved"
-    )
-    if not resolved:
-        return failed("invalid_response")
-    metrics.runtime_interaction_callback_successes += 1
-    app[DIAGNOSTICS_KEY]["last_runtime_interaction_callback"] = "resolved"
-    return True
+    if outcome.resolved:
+        metrics.runtime_interaction_callback_successes += 1
+    else:
+        metrics.runtime_interaction_callback_failures += 1
+    app[DIAGNOSTICS_KEY]["last_runtime_interaction_callback"] = outcome.reason
+    return outcome.resolved
 
 
 async def _interaction_action(

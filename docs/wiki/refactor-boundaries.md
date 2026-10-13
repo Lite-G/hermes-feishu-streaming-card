@@ -7,6 +7,7 @@
 | 终态 PATCH、有限重试、一次补发的顺序 | `terminal_delivery`；结果类型在 `delivery` | server 冻结目标，注入 I/O，核对 generation 后提交回执/通知/检查点 |
 | 事件路由、reply alias、独立通知归属 | `event_rules` | server 在原锁域读取状态并写入 alias；纯规则只返回键或变更计划 |
 | native terminal admission、重复终态与持久 fence 衔接 | `native_admission` | 只依赖原始事件、owner 快照与四方法 store port；server 保留 policy、cache 提交、HTTP/指标与 repair 调度 |
+| 原 Hermes resolver 的单次认证 HTTP 请求 | `interaction_resolver` | server 在原锁内验证 owner、锁外请求、重新入锁校验对象/token/descriptor，再应用结果；指标与 HTTP 回执仍由 server 管理 |
 | 选择值与表单解析 | `interaction_input` | server/SDK 继续负责身份、过期、claim 和原 Hermes resolver |
 | 过期审批窗口的重展资格 | `interaction_rules` | server 先在原锁内验证对象/token/chat/kind 并 expire，再按资格旋转窗口 token；重展不执行 resolver |
 | task 状态投影、颜色语义 | `card_view` | `presentation` 修改已知显示字段；不改执行或授权状态 |
@@ -43,8 +44,10 @@ POSIX writer、bound helpers 和 capability 检查的产品消费者已全部改
 
 ## 仍需继续整理
 
-server 的交互 claim/resolver、handoff repair 编排和部分状态提交仍在协调器；hook producer/SDK 接线、CLI 的完整生命周期事务以及 Gateway/cron 来源家族尚未完成全部拆分。移动端真机、五人上手试用、性能比较与公开包验收分别留在计划中，不用本页的结构说明代替。
+server 的交互 claim/回执、handoff repair 编排和部分状态提交仍在协调器；hook producer/SDK 接线、CLI 的完整生命周期事务以及 Gateway/cron 来源家族尚未完成全部拆分。移动端真机、五人上手试用、性能比较与公开包验收分别留在计划中，不用本页的结构说明代替。
 
 native admission 的有 generation fence 与终态去重仍先于 policy；无 generation 的 legacy lifecycle 准备仍在 policy 之后。返回值分开保存 restore 时的 cache 更新和 expire 后的 selected record，后续拒绝也不能丢弃已发生的 cache 更新。四次 store 操作沿用各自的原子机制，不被描述为一个新的跨调用事务。
 
 已验证的恢复证据删除也由 `posix_transaction` 持有目录句柄：CLI 只选择有序路径、保留原无 identity 的 legacy 分支。执行器先绑定并核验全部目标，再逐项删除，finally 关闭所有句柄；不把多文件删除称为原子事务。旧 `_safe_unlink_restore_evidence` 无外部消费者，随实现迁入实际所有者，不新增 CLI 转发别名。
+
+交互 resolver 只返回受限结果，不接收 app/session、不重试、不更新授权。取消原样传播，由 server 记录取消指标；网络成功仍须通过原身份复核，不可据此直接写入新一轮交互。

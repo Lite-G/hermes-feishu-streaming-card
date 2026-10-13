@@ -48,7 +48,7 @@ Python 3.9 runtime coverage remains separate from this development-tool runtime.
 | Concern | Primary code |
 | --- | --- |
 | Hermes capability/plugin/legacy adapters | `hermes_plugin*`, `hook_runtime.py`, `install/native_hooks.py` |
-| Event and interaction contracts | `events.py`, `event_rules.py`, `interaction_input.py`, `session.py`, `runtime_interaction_transport.py` |
+| Event and interaction contracts | `events.py`, `event_rules.py`, `interaction_input.py`, `interaction_resolver.py`, `session.py`, `runtime_interaction_transport.py` |
 | Orchestration, identity and delivery ownership | `server.py`, `terminal_delivery.py`, `delivery.py`, `native_handoff.py`, `delivery_policy.py` |
 | Presentation and payload budgets | `card_view.py`, `content_plan.py`, `render.py`, `presentation.py`, `reading.py`, `render_options.py`, `card_limits.py` |
 | Feishu I/O and CardKit sequencing | `feishu_client.py`, `cardkit.py` |
