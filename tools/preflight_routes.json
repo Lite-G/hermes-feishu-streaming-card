@@ -25,6 +25,8 @@
     ],
     "install": [
       "tests/unit/test_patcher.py",
+      "tests/unit/test_gateway_contracts.py",
+      "tests/unit/test_stale_interrupted_turn.py",
       "tests/integration/test_cli_install.py"
     ],
     "process": [
