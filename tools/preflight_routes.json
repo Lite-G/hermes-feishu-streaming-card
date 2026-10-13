@@ -94,7 +94,8 @@
       "tests/integration/test_card_freeze.py",
       "tests/unit/test_paused_approval_delivery.py",
       "tests/unit/test_interaction_rules.py",
-      "tests/unit/test_interaction_resolver.py"
+      "tests/unit/test_interaction_resolver.py",
+      "tests/unit/test_interaction_receipts.py"
     ],
     "notices": [
       "tests/unit/test_notice_lifecycle.py",
