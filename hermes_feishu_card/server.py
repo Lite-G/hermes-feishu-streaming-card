@@ -112,6 +112,7 @@ from .interaction_rules import (
 from .interaction_resolver import resolve_interaction
 from .interaction_receipts import build_auxiliary_receipt
 from .owner_display_policy import OwnerRefreshState
+from .message_navigation import MessageNavigation, with_continuation_navigation
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
     NativeTerminalSnapshot,
@@ -5619,6 +5620,7 @@ async def _open_display_continuation(request, session_key, session, card, *, pro
         await _retire_continuation_predecessor(
             app, session_key, previous_message_id, predecessor_snapshot,
             bot_id=app[MESSAGE_BOT_IDS_KEY].get(session_key),
+            navigation=delivery.navigation,
         )
 
 
@@ -5666,7 +5668,7 @@ def _render_static_display_card(app, snapshot, *, session_key, note, display_sta
         return None
 
 
-async def _retire_continuation_predecessor(app, session_key, message_id, snapshot, *, bot_id):
+async def _retire_continuation_predecessor(app, session_key, message_id, snapshot, *, bot_id, navigation=None):
     """Freeze a confirmed handoff without claiming that the whole turn succeeded.
 
     Adapted from PR #339's predecessor-close proposal. Keep the pre-output
@@ -5684,6 +5686,11 @@ async def _retire_continuation_predecessor(app, session_key, message_id, snapsho
         )
         if card is None:
             return False
+        card = with_continuation_navigation(
+            card, navigation,
+            message_id=app[FEISHU_MESSAGE_IDS_KEY].get(session_key) or "",
+            chat_id=snapshot.chat_id,
+        )
         interaction = snapshot.active_interaction
         owner = app[SESSIONS_KEY].get(session_key)
         if (owner is not None and interaction is not None
@@ -7072,6 +7079,7 @@ async def _send_card_for_app(
         # A second restart/draining notice is not evidence of resumed activity.
         _restart_notice_snapshot(app, notice_scope) if delivery_kind != "notice" else ()
     )
+    navigation = None
     try:
         send_delivery = getattr(client, "send_card_delivery", None)
         if callable(send_delivery):
@@ -7085,6 +7093,10 @@ async def _send_card_for_app(
             send_result = await send_delivery(chat_id, card, **send_kwargs)
             message_id = str(getattr(send_result, "message_id", "") or "")
             retry_count = int(getattr(send_result, "retry_count", 0) or 0)
+            candidate = getattr(send_result, "navigation", None)
+            if (isinstance(candidate, MessageNavigation) and candidate.message_id == message_id
+                    and candidate.chat_id == chat_id):
+                navigation = candidate
         else:
             send_kwargs = {
                 "thread_id": thread_id,
@@ -7138,6 +7150,7 @@ async def _send_card_for_app(
         message_id=message_id,
         outcome="delivered",
         retry_count=retry_count,
+        navigation=navigation,
     )
 
 

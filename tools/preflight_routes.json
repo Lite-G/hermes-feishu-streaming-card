@@ -509,6 +509,11 @@
       "interaction",
       "runtime"
     ],
+    "hermes_feishu_card/message_navigation.py": [
+      "client",
+      "interaction",
+      "appearance"
+    ],
     "hermes_feishu_card/owner_display_policy.py": [
       "interaction",
       "appearance"

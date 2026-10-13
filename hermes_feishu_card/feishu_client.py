@@ -5,7 +5,7 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from ipaddress import ip_address
 from numbers import Real
@@ -15,6 +15,7 @@ from urllib.parse import quote, urlparse
 import aiohttp
 
 from .card_limits import serialize_card_for_delivery
+from .message_navigation import MessageNavigation, navigation_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class FeishuAPIError(RuntimeError):
 class FeishuSendResult:
     message_id: str
     retry_count: int = 0
+    navigation: MessageNavigation | None = field(default=None, repr=False)
 
 
 def build_delivery_uuid(
@@ -330,6 +332,10 @@ class FeishuClient:
                 return FeishuSendResult(
                     message_id=data["message_id"],
                     retry_count=attempt_index,
+                    navigation=navigation_from_response(
+                        data, api_base_url=self.base_url, chat_id=chat_id,
+                        thread_id=thread_id, reply_in_thread=reply_in_thread,
+                    ),
                 )
             except FeishuAPIError as exc:
                 error = FeishuAPIError(
