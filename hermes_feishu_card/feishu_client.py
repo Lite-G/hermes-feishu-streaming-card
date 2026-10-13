@@ -333,7 +333,7 @@ class FeishuClient:
                     message_id=data["message_id"],
                     retry_count=attempt_index,
                     navigation=navigation_from_response(
-                        data, api_base_url=self.base_url, chat_id=chat_id,
+                        data, api_base_url=self.config.base_url, chat_id=chat_id,
                         thread_id=thread_id, reply_in_thread=reply_in_thread,
                     ),
                 )
