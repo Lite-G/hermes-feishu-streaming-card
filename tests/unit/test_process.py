@@ -2843,6 +2843,13 @@ def test_pidfile_inspection_gate_with_modern_path_semantics(
     monkeypatch.setattr(process.os, "open", denied_open)
     monkeypatch.setattr(process.os, "stat", denied_stat)
     monkeypatch.setattr(process.os, "lstat", denied_lstat)
+    # Older pathlib caches OS functions in its accessor at import time. Patch
+    # that same I/O boundary too, otherwise the injected denial never reaches
+    # Path.lstat() on those supported interpreters.
+    accessor = getattr(record_path, "_accessor", None)
+    if accessor is not None:
+        monkeypatch.setattr(accessor, "stat", denied_stat)
+        monkeypatch.setattr(accessor, "lstat", denied_lstat)
     monkeypatch.setattr(process.Path, "exists", exists_like_python314)
     monkeypatch.setattr(process.Path, "is_symlink", is_symlink_like_python314)
 
