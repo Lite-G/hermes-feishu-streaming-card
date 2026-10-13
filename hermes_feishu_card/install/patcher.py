@@ -1409,34 +1409,12 @@ def _apply_callback_patch(
     if owned_block is not None:
         lines = content.splitlines(keepends=True)
         begin_index, end_index = owned_block
-        if required_callback_calls:
-            # Hermes may define the same local callback name for multiple
-            # mutually-exclusive transports. Rebuild selector-sensitive
-            # blocks from the unpatched source so upgrades can relocate an
-            # older hook that landed in the wrong callback.
-            content = "".join(lines[:begin_index] + lines[end_index + 1 :])
-            return _apply_callback_patch(
-                content,
-                callback_name=callback_name,
-                begin_marker=begin_marker,
-                end_marker=end_marker,
-                renderer=renderer,
-                required_outer_names=required_outer_names,
-                required_callback_args=required_callback_args,
-                required_callback_calls=required_callback_calls,
-                allow_turn_context=allow_turn_context,
-            )
-        indent = _leading_whitespace(_strip_line_ending(lines[begin_index]))
-        newline = _line_ending(lines[begin_index]) or _detect_newline(content)
-        expected = (
-            _render_turn_context_hook_block(renderer, indent, newline)
-            if allow_turn_context
-            and any("_hfc_turn_ctx = ctx" in line for line in lines[begin_index : end_index + 1])
-            else renderer(indent, newline)
-        )
-        if lines[begin_index : end_index + 1] == expected:
-            return content
-        return "".join(lines[:begin_index] + expected + lines[end_index + 1 :])
+        # A marker proves ownership of these lines, not the identity of the
+        # callback that still runs. Re-select from the original source for every
+        # callback, including progress/interim callbacks without preferred calls.
+        # Unknown/ambiguous optional seams stay unpatched instead of retaining a
+        # stale hook and reporting it as a verified installation.
+        content = "".join(lines[:begin_index] + lines[end_index + 1 :])
 
     tree = _parse_content(content)
     lines = content.splitlines(keepends=True)
@@ -1681,19 +1659,20 @@ def _find_callback_body_location(
             ):
                 continue
             candidates.append(node)
+    candidate = _select_callback_candidate(candidates, required_callback_calls)
+    return _body_location(candidate, lines) if candidate is not None else None
+
+
+def _select_callback_candidate(candidates, required_callback_calls=()):
+    """Keep the established preferred-call fallback, but never guess a target."""
     if required_callback_calls:
         preferred = [
-            node
-            for node in candidates
+            node for node in candidates
             if _has_required_callback_calls(node, required_callback_calls)
         ]
         if preferred:
             candidates = preferred
-        elif len(candidates) != 1:
-            return None
-    if not candidates:
-        return None
-    return _body_location(candidates[0], lines)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _find_turn_runner_callback_body_location(
@@ -1737,21 +1716,12 @@ def _find_turn_runner_callback_body_location(
     ]
     if direct_context:
         candidates = [node for node in candidates if _binds_turn_context(node)]
-    if required_callback_calls:
-        preferred = [
-            node
-            for node in candidates
-            if _has_required_callback_calls(node, required_callback_calls)
-        ]
-        if preferred:
-            candidates = preferred
-        elif len(candidates) != 1:
-            return None
-    if len(candidates) != 1:
+    candidate = _select_callback_candidate(candidates, required_callback_calls)
+    if candidate is None:
         return None
     if direct_context:
-        return _turn_context_binding_location(candidates[0], lines)
-    return _body_location(candidates[0], lines)
+        return _turn_context_binding_location(candidate, lines)
+    return _body_location(candidate, lines)
 
 
 def _find_stable_tool_lifecycle_location(tree, lines):
