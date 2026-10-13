@@ -1117,3 +1117,60 @@ def test_second_review_real_ignored_unchecked_pyc_cannot_influence_probe(
         "turn_start", "turn_terminal_result", "stable_tool_lifecycle",
         "approval_observe",
     }
+
+
+def test_installed_probe_helper_bounds_and_redacts_child_stderr(tmp_path, monkeypatch):
+    runtime = tmp_path / "runtime" / "bin" / "python"
+    allowed = "native source probe failed: stage=snapshot kind=timeout"
+    stderr = "\n".join([
+        "PRIVATE_COMMAND PRIVATE_PATH PRIVATE_SECRET",
+        "native source probe failed: stage=PRIVATE_STAGE kind=timeout",
+        "native source probe failed: stage=git_head kind=PRIVATE_KIND",
+        "native source probe failed: stage=git_head kind=timeoutPRIVATE_SECRET",
+        *[allowed + " PRIVATE_EXCEPTION_BODY" for _ in range(12)],
+    ])
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: SimpleNamespace(
+        stdout=json.dumps({"reason_code": "source_commit_mismatch", "source_commit": ""}),
+        stderr=stderr,
+    ))
+
+    result = _run_installed_probe(runtime, tmp_path / "PRIVATE_SOURCE_ROOT")
+
+    assert result["source_probe_failures"] == [("snapshot", "timeout")] * 8
+    assert "PRIVATE_" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("source_commit", ["a" * 40, "PRIVATE_COMMIT_PATH"], ids=["valid-sha", "invalid-sha"])
+@pytest.mark.parametrize("reason_code", ["source_commit_mismatch", "PRIVATE_REASON"], ids=["valid-reason", "invalid-reason"])
+def test_installed_probe_failure_assertion_has_only_safe_context(
+    tmp_path, monkeypatch, source_commit, reason_code,
+):
+    runtime = tmp_path / "runtime" / "bin" / "python"
+    monkeypatch.setitem(globals(), "FIXED_SOURCE_ROOT", tmp_path)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: SimpleNamespace(
+        stdout=json.dumps({
+            "reason_code": reason_code, "source_commit": source_commit,
+            "module_origin": "PRIVATE_MODULE_PATH", "home_root": "PRIVATE_HOME",
+        }),
+        stderr="native source probe failed: stage=git_head kind=timeout\nPRIVATE_RAW_STDERR",
+    ))
+
+    with pytest.raises(AssertionError) as failure:
+        test_real_regular_wheel_plugin_manager_probe_reports_exactly_four_capabilities(runtime)
+
+    rendered = str(failure.value)
+    assert (reason_code if reason_code == "source_commit_mismatch" else "unavailable") in rendered
+    assert "git_head" in rendered and "timeout" in rendered
+    assert (source_commit if source_commit == "a" * 40 else "unavailable") in rendered
+    assert "PRIVATE_" not in rendered
+
+
+def test_installed_probe_success_keeps_payload_without_raw_stderr(tmp_path, monkeypatch):
+    payload = {"reason_code": "verified", "source_commit": "b" * 40, "available": ["turn_start"]}
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: SimpleNamespace(
+        stdout=json.dumps(payload), stderr="PRIVATE_UNRELATED_WARNING",
+    ))
+
+    result = _run_installed_probe(tmp_path / "runtime/bin/python", tmp_path)
+
+    assert result == {**payload, "source_probe_failures": []}
