@@ -503,3 +503,67 @@ def _write_targets_transactionally(
                 pass
 
 
+def _remove_verified_restore_evidence(
+    paths_to_remove: list[Path],
+    restore_identities: dict[Path, _RestoreEvidenceSnapshot | None],
+    restore_directory_identities: dict[Path, _RestoreIdentity | None] | None,
+) -> None:
+    """Bind and verify every planned target before ordered evidence removal.
+
+    The caller chooses the paths and owns the recovery plan. Removal is not
+    atomic across files; all acquired directory descriptors are closed on exit.
+    """
+    if not _cli_dirfd_binding_supported():
+        raise ValueError(
+            "secure restore cleanup requires directory-relative filesystem "
+            "operations on this platform"
+        )
+    bindings: dict[Path, _CliTargetBinding] = {}
+    try:
+        for path in paths_to_remove:
+            if restore_directory_identities is not None:
+                _assert_restore_directory_ancestry_unchanged(
+                    path, restore_directory_identities
+                )
+            binding = _bind_cli_target(path)
+            bindings[path] = binding
+            expected_snapshot = restore_identities.get(path)
+            if binding.initial_snapshot != expected_snapshot:
+                raise ValueError(
+                    f"{path.name} changed during restore; refusing to clean up"
+                )
+            if restore_directory_identities is not None:
+                _assert_restore_directory_ancestry_unchanged(
+                    path, restore_directory_identities
+                )
+                expected_parent = restore_directory_identities.get(path.parent)
+                if (
+                    expected_parent is not None
+                    and binding.parent_identity != expected_parent
+                ):
+                    raise ValueError(
+                        f"{path.parent.name} directory changed during restore; "
+                        "refusing to restore"
+                    )
+        for path in paths_to_remove:
+            _safe_unlink_restore_evidence(
+                bindings[path], restore_identities.get(path)
+            )
+    finally:
+        for binding in bindings.values():
+            try:
+                binding.close()
+            except OSError:
+                pass
+
+
+def _safe_unlink_restore_evidence(
+    binding: _CliTargetBinding,
+    expected_snapshot: _RestoreEvidenceSnapshot | None,
+) -> None:
+    if expected_snapshot is not None:
+        _unlink_bound_cli_target(binding, expected_snapshot)
+    elif _read_bound_cli_target(binding.parent_fd, binding.basename) is not None:
+        raise ValueError(
+            f"{binding.basename} changed during restore; refusing to clean up"
+        )
