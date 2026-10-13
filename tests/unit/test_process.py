@@ -534,15 +534,52 @@ def test_state_directory_parent_traversal_is_rejected_without_posix_permissions(
     ) == "state directory path must not contain parent traversal"
 
 
-def test_state_directory_resolution_failure_is_fail_closed(monkeypatch, tmp_path):
+def test_state_directory_symlink_loop_is_fail_closed(monkeypatch, tmp_path):
     loop = tmp_path / "loop"
     loop.symlink_to(loop, target_is_directory=True)
     monkeypatch.setattr(process, "state_dir", lambda: loop / "state")
+    mutations = []
+    monkeypatch.setattr(process.os, "mkdir", lambda *args, **kwargs: mutations.append("mkdir"))
+    monkeypatch.setattr(process.os, "chmod", lambda *args, **kwargs: mutations.append("chmod"))
+
+    # Python 3.13+ resolve(strict=False) leaves loops unresolved; the explicit
+    # lstat walk must still reject them. Older Python raises during resolve.
+    error = process._state_dir_security_error(
+        allow_missing=True,
+        require_private_mode=False,
+    )
+    assert error in {
+        "state directory could not be inspected",
+        "state directory path must not contain symbolic links",
+    }
+    assert process._prepare_private_state_dir() == f"failed: {error}"
+    assert mutations == []
+
+
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError])
+def test_state_directory_resolution_failure_is_fail_closed(
+    monkeypatch, tmp_path, error_type,
+):
+    target = tmp_path / "state"
+    monkeypatch.setattr(process, "state_dir", lambda: target)
+    original_resolve = process.Path.resolve
+    mutations = []
+
+    def fail_resolution(path, *args, **kwargs):
+        if path == target:
+            raise error_type("injected resolution failure")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(process.Path, "resolve", fail_resolution)
+    monkeypatch.setattr(process.os, "mkdir", lambda *args, **kwargs: mutations.append("mkdir"))
+    monkeypatch.setattr(process.os, "chmod", lambda *args, **kwargs: mutations.append("chmod"))
 
     assert process._state_dir_security_error(
         allow_missing=True,
         require_private_mode=False,
     ) == "state directory could not be inspected"
+    assert process._prepare_private_state_dir() == "failed: state directory could not be inspected"
+    assert mutations == []
 
 
 def test_start_sidecar_refuses_symlink_state_directory_without_chmod_target(
