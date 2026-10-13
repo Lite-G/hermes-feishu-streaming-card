@@ -3350,7 +3350,21 @@ async def test_hfc_operational_commands_surface_native_handoff_manual_review_saf
             )
 
             assert response.status == 200
-            content = str(feishu_client.sent[-1][1])
+            async def own_card(command=command):
+                while True:
+                    for chat_id, card, _thread_id, reply_id in feishu_client.sent:
+                        if (
+                            chat_id == f"oc_{command}_secret"
+                            and reply_id == f"om_{command}_secret"
+                        ):
+                            return card
+                    await _REAL_ASYNCIO_SLEEP(0.005)
+
+            card = await asyncio.wait_for(own_card(), timeout=5)
+            content = str(card)
+            if command == "doctor":
+                assert "运行诊断" in content
+            assert inspect_card_limits(card).safe
             assert "native_handoff.records: 4" in content
             assert "native_handoff.pending: 2" in content
             assert "native_handoff.uncertain: 1" in content
@@ -14599,3 +14613,72 @@ def test_cleanup_state_adapter_borrows_each_live_app_registry():
     refreshed = sidecar_server._cleanup_state_for_app(app)
     assert refreshed.aliases is replacement
     assert state.aliases is not replacement
+
+
+@pytest.mark.parametrize("state", ["diagnosed", "preparing", "executing", "restarting", "failed", "completed"])
+def test_operations_handoff_warning_refresh_keeps_report_identity_and_budget(state):
+    from hermes_feishu_card.card_limits import serialize_card_for_delivery
+
+    snapshot = {
+        "records": 512,
+        "delivery_states": {"pending": 511, "acked": 0, "uncertain": 1},
+        "manual_review_required": True,
+        "raw_identifier": "oc_do_not_disclose",
+        "next_action": "PRIVATE_ACTION",
+    }
+    app = create_app(
+        FakeFeishuClient(),
+        native_handoff_store=SimpleNamespace(safe_status=lambda: snapshot),
+    )
+    report = operations_report()
+    store = app[sidecar_server.OPERATIONS_STORE_KEY]
+    operation = store.create(
+        chat_id="oc_private", profile_id="default",
+        report_fingerprint=report.fingerprint,
+        recovery_fingerprint=report.recovery_fingerprint,
+        group=False, transport_secret=b"c" * 32,
+    )
+    operation.report = report
+    operation.state = state
+    before = (report.fingerprint, operation.report_fingerprint, operation.recovery_fingerprint)
+    card = sidecar_server._render_operations_for_app(app, report, operation)
+    content = serialize_card_for_delivery(card)
+    assert "native_handoff.records: 512" in content
+    assert "native_handoff.uncertain: 1" in content
+    assert "先确认飞书原生会话是否已收到答案" in content
+    assert "oc_do_not_disclose" not in content
+    assert "PRIVATE_ACTION" not in content
+    assert inspect_card_limits(card).safe
+    snapshot.update(records=2, delivery_states={"pending": 1, "acked": 1, "uncertain": 0}, manual_review_required=False)
+    updated = str(sidecar_server._render_operations_for_app(app, report, operation))
+    assert "native_handoff.records: 2" in updated
+    assert "native_handoff.records: 512" not in updated
+    assert "先确认飞书原生会话是否已收到答案" not in updated
+    snapshot.update(records=0, delivery_states={}, manual_review_required=False)
+    cleared = str(sidecar_server._render_operations_for_app(app, report, operation))
+    assert "原生投递状态" not in cleared
+    assert "native_handoff." not in cleared
+    assert before == (report.fingerprint, operation.report_fingerprint, operation.recovery_fingerprint)
+
+
+def test_operations_handoff_unavailable_is_safe_manual_review_warning():
+    def unavailable():
+        raise OSError("oc_private_identifier secret-path")
+
+    app = create_app(FakeFeishuClient(), native_handoff_store=SimpleNamespace(safe_status=unavailable))
+    report = operations_report()
+    store = app[sidecar_server.OPERATIONS_STORE_KEY]
+    operation = store.create(
+        chat_id="oc_private", profile_id="default",
+        report_fingerprint=report.fingerprint,
+        recovery_fingerprint=report.recovery_fingerprint,
+        group=False, transport_secret=b"c" * 32,
+    )
+    operation.report = report
+    card = sidecar_server._render_operations_for_app(app, report, operation)
+    content = str(card)
+    assert "native_handoff.manual_review_required: true" in content
+    assert "先确认飞书原生会话是否已收到答案" in content
+    assert "oc_private_identifier" not in content
+    assert "secret-path" not in content
+    assert inspect_card_limits(card).safe
