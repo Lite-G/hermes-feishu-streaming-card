@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import time
-from typing import Any
+from typing import Any, cast
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -53,7 +53,7 @@ async def resolve_interaction(
         or not choice.strip()
     ):
         return ResolutionOutcome("invalid_descriptor")
-    expires_at = descriptor.get("expires_at")
+    expires_at = cast(float, descriptor.get("expires_at"))
     if type(expires_at) not in (int, float) or time.time() >= expires_at:
         return ResolutionOutcome("expired_before_request")
     body_value = {
