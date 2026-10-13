@@ -90,6 +90,8 @@
 
 只读快照在能力探测结束或构建异常后必须回收。删除前只通过绑定的目录描述符恢复本目录写权限，不改文件权限、不沿符号链接进入外部目录；身份变化时保留未知路径并报告清理未完成。正常关闭、异常、重复关闭、目录重绑定、符号链接和硬链接保护见 `tests/unit/test_native_snapshot_cleanup.py`。与 `tests/unit/test_native_hook_capabilities.py`、安装检测和 CLI 安装一起验证。收尾应同时检查任务目录与实际系统临时目录，不能只看 `TMPDIR`。
 
+native 来源探测在快照前后分别用可信 Git 验证 HEAD 与 clean state。HEAD 与 status 各有 5 秒有界预算，不重试、不缓存来源、不省略末尾复核；超时继续拒绝能力。公开 refusal 保持兼容，诊断中的 `stage=git_head kind=timeout` 才说明读取超时，不能从 `source_commit_mismatch` 单独推断实际提交漂移。
+
 ### `hermes_feishu_card/install/patcher.py`
 
 Cron 的交付位置定位在 `install/cron_contracts.py`，通用正文/docstring 位置在 `install/ast_contracts.py`；不得把媒体 hook 移到 extract/filter 之前，或用文件拆分改变旧源码接受范围。

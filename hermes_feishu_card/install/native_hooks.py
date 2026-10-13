@@ -92,6 +92,9 @@ _MAX_MANIFEST_BYTES = 128 * 1024
 _MAX_SLICE_BYTES = 128 * 1024
 _MAX_SUBPROCESS_BYTES = 64 * 1024
 _PLUGIN_PROBE_TIMEOUT_SECONDS = 15.0
+# HEAD is checked before and after the snapshot. Allow the same bounded
+# startup window as status; slow process launch must still fail closed.
+_GIT_HEAD_TIMEOUT_SECONDS = 5.0
 _LOGGER = logging.getLogger(__name__)
 _TRUSTED_GIT = Path("/usr/bin/git")
 _MAX_ARCHIVE_MEMBER_BYTES = 32 * 1024 * 1024
@@ -2374,7 +2377,7 @@ def _log_source_probe_failure(stage: str, failure: BaseException) -> None:
 def _git_head(root: Path) -> str:
     try:
         result = _run_trusted_git(
-            root, ["rev-parse", "--verify", "HEAD"], timeout=3
+            root, ["rev-parse", "--verify", "HEAD"], timeout=_GIT_HEAD_TIMEOUT_SECONDS
         )
     except (OSError, subprocess.SubprocessError) as exc:
         _log_source_probe_failure("git_head", exc)
