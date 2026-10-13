@@ -60,6 +60,7 @@ from .interaction_input import (
 )
 from .event_rules import (
     active_session_key, resolve_session_key, session_alias_assignments,
+    interaction_reply_placement,
     TERMINAL_EVENTS,
     TURN_REOPENING_EVENTS,
     SESSION_CREATING_EVENTS,
@@ -5135,22 +5136,15 @@ async def _apply_event_locked_inner(
             interaction.interaction_id if interaction is not None else "pending"
         )
         bot_id = message_bot_ids.get(session_key)
-        sticky_reply_to_message_id = (
-            session.reply_to_message_id
-            if session.reply_in_thread
-            and session.reply_to_message_id.startswith("om_")
-            else ""
-        )
-        reply_to_message_id = (
-            sticky_reply_to_message_id
-            or _reply_to_message_id_for_event(incoming_event)
-            or session.reply_to_message_id
-            or None
+        placement = interaction_reply_placement(
+            incoming_event,
+            session_reply_to_message_id=session.reply_to_message_id,
+            session_reply_in_thread=session.reply_in_thread,
         )
         if interaction is not None:
-            interaction.thread_id = _thread_id_for_event(incoming_event) or ""
-            interaction.reply_to_message_id = reply_to_message_id or ""
-            interaction.reply_in_thread = _reply_in_thread_for_event(incoming_event) or session.reply_in_thread
+            interaction.thread_id = placement.thread_id or ""
+            interaction.reply_to_message_id = placement.reply_to_message_id or ""
+            interaction.reply_in_thread = placement.reply_in_thread
         if _session_has_runtime_admission(session):
             if rollback_session_snapshot is None or interaction is None:
                 metrics.events_rejected += 1
@@ -5179,12 +5173,9 @@ async def _apply_event_locked_inner(
                 card=copy.deepcopy(render_result.card),
                 chat_id=event.chat_id,
                 bot_id=bot_id,
-                thread_id=_thread_id_for_event(incoming_event),
-                reply_to_message_id=reply_to_message_id,
-                reply_in_thread=(
-                    _reply_in_thread_for_event(incoming_event)
-                    or session.reply_in_thread
-                ),
+                thread_id=placement.thread_id,
+                reply_to_message_id=placement.reply_to_message_id,
+                reply_in_thread=placement.reply_in_thread,
                 predecessor_message_id=feishu_message_id,
                 delivery_key=f"{session_key}:interaction:{interaction_id}",
             )
@@ -5197,12 +5188,9 @@ async def _apply_event_locked_inner(
             event.chat_id,
             render_result.card,
             bot_id,
-            thread_id=_thread_id_for_event(incoming_event),
-            reply_to_message_id=reply_to_message_id,
-            reply_in_thread=(
-                _reply_in_thread_for_event(incoming_event)
-                or session.reply_in_thread
-            ),
+            thread_id=placement.thread_id,
+            reply_to_message_id=placement.reply_to_message_id,
+            reply_in_thread=placement.reply_in_thread,
             delivery_key=f"{session_key}:interaction:{interaction_id}",
             delivery_kind="interaction",
             profile_id=_policy_profile_id(event),

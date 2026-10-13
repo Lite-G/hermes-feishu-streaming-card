@@ -6,7 +6,7 @@ turn identity stays distinct from reply aliases and Feishu thread anchors.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import re
 from typing import Any, Protocol, TYPE_CHECKING
 
@@ -290,3 +290,36 @@ def session_alias_assignments(
         if alias_key and alias_key != canonical_key:
             aliases[alias_key] = canonical_key
     return aliases
+
+
+@dataclass(frozen=True)
+class InteractionReplyPlacement:
+    thread_id: str | None
+    reply_to_message_id: str | None
+    reply_in_thread: bool
+
+
+def interaction_reply_placement(
+    event: SidecarEvent,
+    *,
+    session_reply_to_message_id: str,
+    session_reply_in_thread: bool,
+) -> InteractionReplyPlacement:
+    """Keep one placement for the state, reserved send and direct send.
+
+    A verified sticky IM anchor takes precedence over a subsequent event's
+    anchor. This is display routing only, never turn or authorization identity.
+    """
+    sticky_anchor = (
+        session_reply_to_message_id
+        if session_reply_in_thread and session_reply_to_message_id.startswith("om_")
+        else ""
+    )
+    return InteractionReplyPlacement(
+        thread_id=thread_id_for_event(event),
+        reply_to_message_id=(
+            sticky_anchor or reply_to_message_id_for_event(event)
+            or session_reply_to_message_id or None
+        ),
+        reply_in_thread=reply_in_thread_for_event(event) or session_reply_in_thread,
+    )
