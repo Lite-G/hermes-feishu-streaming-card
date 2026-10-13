@@ -14420,7 +14420,9 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
                 release.set()
                 deadline = asyncio.get_running_loop().time() + 5
                 while asyncio.get_running_loop().time() < deadline:
-                    if all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count)):
+                    # Server receipt precedes the client consuming its response.
+                    # Observe completion at the same boundary used below.
+                    if all(f"FINAL_{prefix}{i}_END" in str(feishu.updated) for i in range(session_count)):
                         break
                     await asyncio.sleep(0.01)
                 assert all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count))
