@@ -102,7 +102,8 @@ def test_count_markdown_tables_zero():
     "｜表头｜值｜\n｜---｜---｜\n｜a｜b｜",
     r"only escaped \| separator", "only `inline | code` here",
     "```text\n| a | b |\n| --- | --- |\n| one | two |\n```",
-])
+], ids=["empty", "long-ascii", "long-cjk", "fullwidth-pipes",
+        "escaped-pipe", "inline-code-pipe", "fenced-table"])
 def test_table_fastpath_preserves_non_tables_code_and_empty_input(source):
     assert count_markdown_tables(source) == 0
 
