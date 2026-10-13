@@ -22,7 +22,7 @@
 | Cron 交付位置与通用函数正文位置 | `install/cron_contracts`、`install/ast_contracts` | patcher 选择原 marker/render/apply 路径；媒体过滤后的插入优先级、类/模块搜索顺序与 docstring/单行正文拒绝保持 |
 | Base delivery 源码家族验证 | `install/base_contracts`、`install/ast_contracts` | patcher 传入原 renderer 生成的 owned blocks，再按原事务应用 |
 | portable 安装文件事务与 evidence | `install/file_transaction` | CLI 与 decomposed installer 共用；自动恢复仍要求原有更强目录绑定 |
-| POSIX 目录句柄、原子写入、事务回滚及已验证证据删除 | `install/posix_transaction` | CLI 选择安装/恢复计划并传入原有 pre-commit/validate callbacks；底层模块不导入 CLI |
+| POSIX 目录句柄、文件/stage 身份、bound replace/unlink、回滚内容验证及 cleanup | `install/posix_transaction` | CLI、Recovery、Integrity 共用物理 I/O；各入口保留原计划、锁、fingerprint/Git、ancestry 策略和事务顺序；底层不导入 planner/CLI |
 | 会话、锁及 controller 清理 | `lifecycle.CleanupState` | server 注入清理所需实时 registry 引用；lifecycle 不导入 server、不持有 Application，原身份复核、顺序与上限保持 |
 | 当前卡片替换资格、输入冻结与回执方言选择 | `owner_display_policy` | 原 owner/generation 先核验；failed 回执先渲染再选来源；模式按原分支惰性查询；实际 PATCH 和提交留 server |
 | 维护排空证据与连续空闲心跳 | `maintenance_evidence` | 原维护编排保留轮询、时间、锁、lease 与停服；每 sender 数据仍由 runtime_ownership 管理 |
@@ -67,3 +67,13 @@ resolver 按原 2 秒预算读取完整响应，最多缓存 513 字节；未到
 已清退仓库内无产品或测试消费者的五个私有导入别名：`server._session_alias_keys_for_event`、`cli._assert_restore_directory_ancestry_unchanged`、`hook_runtime._model_picker_provider_options`、`_model_picker_model_options`、`_model_picker_current_provider_slug`。实现仍分别归 event_rules、install.file_transaction、command_cards；有消费者或明确兼容合同的 reexport 保留。
 
 清理 view 只借用现有 registry 对象，单次同步遍历不创建第二套缓存或持久化状态。server 在各调用入口从当前 AppKey 组装 view，lifecycle 继续复核 session/controller/lock 对象身份并保留活跃发送和锁用户；不把整个 Application 作为通用上下文传递。
+
+## Recovery / Integrity 的共同物理 I/O
+
+`BoundTarget`、`BoundStage` 与读取、staging、replace/unlink、cleanup primitive 的唯一实现位于 `install/posix_transaction.py`。Recovery/Integrity 的私有 `_bind_target`、`_stage_text`、snapshot adapters 只选择原 refusal 类型和上下文；Recovery `_atomic_replace` 保留既有故障注入消费者的薄委托，staged.target_binding 绑定原 destination，不是授权证明。没有消费者的 `_open_staging_parent`、`_controlled_ancestry_paths`、`_read_directory_identity` 私有副本已移除。新的物理故障注入指向实际 I/O owner。
+
+两种恢复入口仍严格拒绝不支持 secure dirfd 的平台，CLI 原 portable fallback 仍由 `file_transaction` 持有。恢复阶段先完成原 ancestry/prewrite checks 再读取目标；CLI bind 时读取 initial bytes/mode 的原时点保留。恢复 text stage 持有 dup fd，保留 write/flush/fsync/fchmod 顺序；CLI bytes stage 借用 binding fd，保留 write/fchmod/close。原 bytes/newline、mode、非 UTF-8 拒绝、absence 与不可检查 metadata 的区分不变。CLI 允许原本不存在的 ancestry 时点没有放宽给恢复 planner。
+
+Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序回滚，以及 Integrity 的 Git/provenance、pre_commit_validate/post validate 和错误包装仍在各执行器。只在本次写入 identity/digest 尚匹配时回滚；替换目录或并发编辑的文件不能被当前 lexical path 覆盖，未知 inode 的 stage 不清除。底层收敛不等于三个恢复计划或 portable/POSIX 策略合并。
+
+本职责包的产品实现需独立验证 Recovery、Integrity 和真实 CLI 三个原入口；既有 CLI writer 绿色证据不能代替另两入口。源码、普通 wheel 和平台验收仍各自登记，不由本页声明通过。

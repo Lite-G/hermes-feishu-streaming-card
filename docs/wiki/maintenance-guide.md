@@ -126,6 +126,8 @@ Gateway stale-result 的 AST 来源绑定判断在 `install/gateway_contracts.py
 - 自动 repair 只适用于 known-safe state；`--no-repair` 必须保持有效，用户编辑不能被覆盖。
 - `integrity.mode=safe` 还必须验证 Git root/ancestry/current blobs、provenance、anchors、可逆 patch 和 mutation 前 fingerprint；runtime heartbeat 本身不构成 mutation 权限。修复只设置 restart required，不能自动重启 Gateway。
 - 调整 planner/executor 时运行 `tests/unit/test_recovery.py`、`tests/unit/test_operations.py`、`tests/integration/test_server.py`；涉及安装器时再加 `tests/integration/test_cli_install.py`。
+- Recovery/Integrity/CLI 的 secure filesystem primitive 共同归 `install/posix_transaction.py`：目录身份、bound read/stage/replace/unlink 和 cleanup 故障必须注入实际 owner。planner fingerprint、Git/provenance、锁、pre/post validate、逆序回滚仍在原入口；不能把 CLI portable fallback 或原不存在目录的策略用于强恢复。
+- 变更共同 I/O 时同时验证 `tests/unit/test_recovery.py`、`tests/unit/test_integrity.py`、`tests/integration/test_cli_integrity.py` 和 `tests/integration/test_cli_install.py`，重点保留 parent ABA/swap、同 inode 编辑、stage 替换、失败 rollback 与原 bytes/mode；最后执行 full/package/platform 门禁。实现与独立验收分开。
 - ownership manifest 与 recovery plan 的受管相对路径统一写成 POSIX 表示。兼容旧 Windows manifest 时只可把 `\\` 规范化为 `/` 后做精确等值比较；绝对路径、父目录跳转或多余后缀仍须拒绝。
 
 ### `hermes_feishu_card/process.py` and sidecar lifecycle
