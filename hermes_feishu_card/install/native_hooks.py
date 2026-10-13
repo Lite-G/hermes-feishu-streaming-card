@@ -92,6 +92,7 @@ _MAX_MANIFEST_BYTES = 128 * 1024
 _MAX_SLICE_BYTES = 128 * 1024
 _MAX_SUBPROCESS_BYTES = 64 * 1024
 _PLUGIN_PROBE_TIMEOUT_SECONDS = 15.0
+_LOGGER = logging.getLogger(__name__)
 _TRUSTED_GIT = Path("/usr/bin/git")
 _MAX_ARCHIVE_MEMBER_BYTES = 32 * 1024 * 1024
 _MAX_ARCHIVE_TOTAL_BYTES = 512 * 1024 * 1024
@@ -632,7 +633,8 @@ def probe_native_hook_capabilities(
             snapshot = _build_trusted_source_snapshot(
                 root, expected_commit, provenance
             )
-        except (OSError, subprocess.SubprocessError, tarfile.TarError, ValueError):
+        except (OSError, subprocess.SubprocessError, tarfile.TarError, ValueError) as exc:
+            _log_source_probe_failure("snapshot", exc)
             return _closed_probe(
                 "source_commit_mismatch", observed_commit=actual_commit
             )
@@ -2346,12 +2348,36 @@ def _validate_runtime_python(value: str | Path) -> _RuntimeBinding:
     )
 
 
+def _log_source_probe_failure(stage: str, failure: BaseException) -> None:
+    """Keep the public refusal stable, but make its internal cause actionable.
+
+    Subprocess exceptions embed commands, paths and output. Never format the
+    exception itself or attach exc_info to this diagnostic.
+    """
+    if stage not in {"git_head", "git_status", "snapshot"}:
+        stage = "unknown"
+    if isinstance(failure, subprocess.TimeoutExpired):
+        kind = "timeout"
+    elif isinstance(failure, subprocess.CalledProcessError):
+        kind = "command_failed"
+    elif isinstance(failure, FileNotFoundError):
+        kind = "unavailable"
+    elif isinstance(failure, OSError):
+        kind = "io_error"
+    elif isinstance(failure, tarfile.TarError):
+        kind = "invalid_archive"
+    else:
+        kind = "invalid_evidence"
+    _LOGGER.warning("native source probe failed: stage=%s kind=%s", stage, kind)
+
+
 def _git_head(root: Path) -> str:
     try:
         result = _run_trusted_git(
             root, ["rev-parse", "--verify", "HEAD"], timeout=3
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        _log_source_probe_failure("git_head", exc)
         return ""
     if type(result.stdout) is not bytes:
         return ""
@@ -2370,7 +2396,8 @@ def _git_source_state(root: Path) -> tuple[str, bool]:
             ["status", "--porcelain=v1", "--untracked-files=all"],
             timeout=5,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        _log_source_probe_failure("git_status", exc)
         return commit, False
     return commit, type(result.stdout) is bytes and result.stdout == b""
 

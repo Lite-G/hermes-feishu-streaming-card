@@ -353,7 +353,7 @@ def install(detection, *, no_repair=False, expected_fingerprint=None, accept_her
             # Explicit installation on Windows uses the same verified portable
             # writer as the monolithic installer. Automatic recovery and backup
             # deletion retain their stronger directory-handle requirement.
-            from ..cli import _snapshot_restore_evidence, _write_targets_portably
+            from .file_transaction import _snapshot_restore_evidence, _write_targets_portably
             evidence = {name: detection.root / name for name in
                         (*SOURCE_TARGETS, *(n + BACKUP_SUFFIX for n in SOURCE_TARGETS), MANIFEST_NAME)}
             identities, directories = _snapshot_restore_evidence(detection.root, evidence)

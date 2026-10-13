@@ -12,6 +12,8 @@ import pytest
 
 from hermes_feishu_card import __version__ as PACKAGE_VERSION
 from hermes_feishu_card import cli
+from hermes_feishu_card.install import posix_transaction
+from hermes_feishu_card.install import file_transaction
 from hermes_feishu_card.install import patcher
 
 
@@ -273,7 +275,7 @@ def test_restore_transaction_rollback_preserves_concurrent_replacement_and_conti
     raced.write_text("raced-before\n", encoding="utf-8")
     owned.write_text("owned-before\n", encoding="utf-8")
     failing.write_text("failing-before\n", encoding="utf-8")
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     writes = 0
 
     def fail_after_concurrent_replacement(path, contents, **kwargs):
@@ -285,10 +287,10 @@ def test_restore_transaction_rollback_preserves_concurrent_replacement_and_conti
             raise OSError("third target unavailable")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_after_concurrent_replacement)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_after_concurrent_replacement)
 
     with pytest.raises(ValueError, match="manual review required"):
-        cli._write_targets_transactionally(
+        posix_transaction._write_targets_transactionally(
             [
                 (raced, "raced-after\n"),
                 (owned, "owned-after\n"),
@@ -296,6 +298,7 @@ def test_restore_transaction_rollback_preserves_concurrent_replacement_and_conti
             ]
         )
 
+    assert writes >= 3
     assert raced.read_text(encoding="utf-8") == "user-concurrent-replacement\n"
     assert owned.read_text(encoding="utf-8") == "owned-before\n"
     assert failing.read_text(encoding="utf-8") == "failing-before\n"
@@ -330,7 +333,7 @@ def test_atomic_write_temp_cleanup_stays_bound_to_staging_parent(
     monkeypatch.setattr(cli.os, "replace", replace_parent_before_temp_replace)
 
     with pytest.raises(ValueError, match="directory changed during write"):
-        cli._atomic_write_text(target, "after\n")
+        posix_transaction._atomic_write_text(target, "after\n")
 
     assert decoy is not None
     assert decoy.read_text(encoding="utf-8") == "after\n"
@@ -347,7 +350,7 @@ def test_restore_transaction_prebinds_parent_across_atomic_write_entry_gap(
     target = parent / "target.txt"
     target.write_text("before\n", encoding="utf-8")
     real_parent = tmp_path / "managed-real"
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     injected = False
 
     def swap_parent_before_atomic_open(path, contents, **kwargs):
@@ -359,10 +362,10 @@ def test_restore_transaction_prebinds_parent_across_atomic_write_entry_gap(
             injected = True
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", swap_parent_before_atomic_open)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", swap_parent_before_atomic_open)
 
     with pytest.raises(ValueError, match="directory changed during write"):
-        cli._write_targets_transactionally([(target, "after\n")])
+        posix_transaction._write_targets_transactionally([(target, "after\n")])
 
     assert injected
     assert (parent / target.name).read_text(encoding="utf-8") == "USER-TARGET\n"
@@ -378,7 +381,7 @@ def test_restore_transaction_absent_rollback_unlink_stays_bound_to_parent(
     failing = parent / "failing.txt"
     failing.write_text("before\n", encoding="utf-8")
     real_parent = tmp_path / "managed-real"
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     original_unlink = cli.os.unlink
     injected = False
 
@@ -397,11 +400,11 @@ def test_restore_transaction_absent_rollback_unlink_stays_bound_to_parent(
             injected = True
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_second_write)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_second_write)
     monkeypatch.setattr(cli.os, "unlink", swap_parent_at_rollback_unlink)
 
     with pytest.raises(OSError, match="second target unavailable"):
-        cli._write_targets_transactionally(
+        posix_transaction._write_targets_transactionally(
             [(created, "created\n"), (failing, "after\n")]
         )
 
@@ -422,7 +425,7 @@ def test_restore_transaction_final_sweep_rolls_back_prior_parent_swap(
     first.write_text("first-before\n", encoding="utf-8")
     second.write_text("second-before\n", encoding="utf-8")
     real_parent = tmp_path / "first-real"
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     injected = False
 
     def swap_first_parent_after_second_commit(path, contents, **kwargs):
@@ -436,11 +439,11 @@ def test_restore_transaction_final_sweep_rolls_back_prior_parent_swap(
         return result
 
     monkeypatch.setattr(
-        cli, "_atomic_write_text", swap_first_parent_after_second_commit
+        posix_transaction, "_atomic_write_text", swap_first_parent_after_second_commit
     )
 
     with pytest.raises(ValueError, match="directory changed"):
-        cli._write_targets_transactionally(
+        posix_transaction._write_targets_transactionally(
             [(first, "first-after\n"), (second, "second-after\n")]
         )
 
@@ -455,10 +458,18 @@ def test_atomic_write_uses_portable_fallback_without_dirfd_support(
 ):
     target = tmp_path / "config.yaml"
     target.write_text("before\n", encoding="utf-8")
-    monkeypatch.setattr(cli, "_cli_dirfd_binding_supported", lambda: False)
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
+    calls = []
 
-    cli._atomic_write_text(target, "after\n")
+    def record_portable(path, contents, **kwargs):
+        calls.append(path)
+        return file_transaction._atomic_write_text_portable(path, contents, **kwargs)
 
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text_portable", record_portable)
+
+    posix_transaction._atomic_write_text(target, "after\n")
+
+    assert calls == [target]
     assert target.read_text(encoding="utf-8") == "after\n"
     assert not list(tmp_path.glob(".config.yaml.*.tmp"))
 
@@ -477,7 +488,7 @@ def test_portable_existing_write_does_not_use_unbound_replace(
 
     monkeypatch.setattr(cli.os, "replace", unexpected_replace)
 
-    cli._atomic_write_text_portable(target, "after\n")
+    file_transaction._atomic_write_text_portable(target, "after\n")
 
     assert not replace_called
     assert target.read_text(encoding="utf-8") == "after\n"
@@ -493,8 +504,9 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
     target = tmp_path / "config.yaml"
     original = b"ORIGINAL-CONTENT\n"
     target.write_bytes(original)
-    expected_snapshot = cli._portable_target_state(target)[0]
+    expected_snapshot = file_transaction._portable_target_state(target)[0]
     assert expected_snapshot is not None
+    injected = []
 
     if failure_stage == "short_write":
         original_write = cli.os.write
@@ -506,6 +518,7 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
             if write_calls == 1:
                 return original_write(fd, payload[:4])
             if write_calls == 2:
+                injected.append(failure_stage)
                 raise OSError("simulated write failure")
             return original_write(fd, payload)
 
@@ -518,6 +531,7 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
             nonlocal truncate_calls
             truncate_calls += 1
             if truncate_calls == 1:
+                injected.append(failure_stage)
                 raise OSError("simulated truncate failure")
             return original_ftruncate(fd, length)
 
@@ -530,34 +544,37 @@ def test_portable_existing_write_restores_original_after_mid_write_failure(
             nonlocal fsync_calls
             fsync_calls += 1
             if fsync_calls == 1:
+                injected.append(failure_stage)
                 raise OSError("simulated fsync failure")
             return original_fsync(fd)
 
         monkeypatch.setattr(cli.os, "fsync", fail_first_fsync)
     else:
-        original_verify = cli._verify_portable_exclusive_bytes
+        original_verify = file_transaction._verify_portable_exclusive_bytes
         verify_calls = 0
 
         def fail_first_verification(fd, path, identity, payload):
             nonlocal verify_calls
             verify_calls += 1
             if verify_calls == 1:
+                injected.append(failure_stage)
                 raise ValueError("simulated post-write verification failure")
             return original_verify(fd, path, identity, payload)
 
         monkeypatch.setattr(
-            cli, "_verify_portable_exclusive_bytes", fail_first_verification
+            file_transaction, "_verify_portable_exclusive_bytes", fail_first_verification
         )
 
     with pytest.raises((OSError, ValueError)):
-        cli._atomic_write_text_portable(
+        file_transaction._atomic_write_text_portable(
             target,
             "REPLACEMENT-CONTENT-WITH-MORE-BYTES\n",
             expected_before=expected_snapshot,
         )
 
+    assert injected == [failure_stage]
     assert target.read_bytes() == original
-    assert cli._portable_target_state(target)[0] == expected_snapshot
+    assert file_transaction._portable_target_state(target)[0] == expected_snapshot
 
 
 @pytest.mark.skipif(os.name != "nt", reason="requires Windows sharing semantics")
@@ -566,7 +583,7 @@ def test_portable_windows_exclusive_handle_blocks_concurrent_writer(
 ):
     target = tmp_path / "config.yaml"
     target.write_text("before\n", encoding="utf-8")
-    original_open = cli._open_portable_exclusive_fd
+    original_open = file_transaction._open_portable_exclusive_fd
     competing_write_blocked = False
 
     def open_and_probe(path, *, create):
@@ -581,9 +598,9 @@ def test_portable_windows_exclusive_handle_blocks_concurrent_writer(
             pytest.fail("Windows exclusive handle allowed a competing writer")
         return fd
 
-    monkeypatch.setattr(cli, "_open_portable_exclusive_fd", open_and_probe)
+    monkeypatch.setattr(file_transaction, "_open_portable_exclusive_fd", open_and_probe)
 
-    cli._atomic_write_text_portable(target, "after\n")
+    file_transaction._atomic_write_text_portable(target, "after\n")
 
     assert competing_write_blocked
     assert target.read_text(encoding="utf-8") == "after\n"
@@ -594,10 +611,10 @@ def test_restore_transaction_fails_closed_without_dirfd_support(
 ):
     target = tmp_path / "run.py"
     target.write_text("before\n", encoding="utf-8")
-    monkeypatch.setattr(cli, "_cli_dirfd_binding_supported", lambda: False)
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
 
     with pytest.raises(ValueError, match="secure restore transaction requires"):
-        cli._write_targets_transactionally([(target, "after\n")])
+        posix_transaction._write_targets_transactionally([(target, "after\n")])
 
     assert target.read_text(encoding="utf-8") == "before\n"
 
@@ -612,14 +629,14 @@ def test_integrity_migration_commits_manifest_and_env_in_one_transaction(
     config_parent.mkdir()
     config_path = config_parent / "config.yaml"
     env_path = config_parent / ".env"
-    original_transaction = cli._write_targets_transactionally
+    original_transaction = posix_transaction._write_targets_transactionally
     calls = []
 
     def record_transaction(changes, **kwargs):
         calls.append(([path for path, _contents in changes], kwargs))
         return original_transaction(changes, **kwargs)
 
-    monkeypatch.setattr(cli, "_write_targets_transactionally", record_transaction)
+    monkeypatch.setattr(posix_transaction, "_write_targets_transactionally", record_transaction)
 
     result = cli._run_integrity(
         Namespace(
@@ -656,7 +673,7 @@ def test_integrity_migration_refuses_env_parent_swap_before_transaction(
     env_before = env_path.read_bytes()
     real_parent = tmp_path / "hfc-config-real"
     manifest_before = manifest_path(hermes_dir).read_bytes()
-    original_transaction = cli._write_targets_transactionally
+    original_transaction = posix_transaction._write_targets_transactionally
 
     def swap_before_transaction(changes, **kwargs):
         config_parent.rename(real_parent)
@@ -667,7 +684,7 @@ def test_integrity_migration_refuses_env_parent_swap_before_transaction(
         return original_transaction(changes, **kwargs)
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", swap_before_transaction
+        posix_transaction, "_write_targets_transactionally", swap_before_transaction
     )
 
     result = cli._run_integrity(
@@ -696,7 +713,7 @@ def test_integrity_migration_refuses_manifest_parent_swap_before_transaction(
     real_root = hermes_dir.with_name("hermes-real")
     config_parent = tmp_path / "hfc-config"
     config_parent.mkdir()
-    original_transaction = cli._write_targets_transactionally
+    original_transaction = posix_transaction._write_targets_transactionally
 
     def swap_before_transaction(changes, **kwargs):
         hermes_dir.rename(real_root)
@@ -707,7 +724,7 @@ def test_integrity_migration_refuses_manifest_parent_swap_before_transaction(
         return original_transaction(changes, **kwargs)
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", swap_before_transaction
+        posix_transaction, "_write_targets_transactionally", swap_before_transaction
     )
 
     result = cli._run_integrity(
@@ -2485,7 +2502,7 @@ def test_restore_transaction_rolls_back_prior_targets_when_cron_parent_swaps(
     evidence_before = {path: path.read_bytes() for path in evidence_paths}
     cron_parent = hermes_dir / "cron"
     real_cron_parent = hermes_dir / "cron-real"
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     injected = False
 
     def swap_cron_after_run_write(path, contents, **kwargs):
@@ -2497,7 +2514,7 @@ def test_restore_transaction_rolls_back_prior_targets_when_cron_parent_swaps(
             injected = True
         return result
 
-    monkeypatch.setattr(cli, "_atomic_write_text", swap_cron_after_run_write)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", swap_cron_after_run_write)
 
     runner = cli._run_restore if command == "restore" else cli._run_uninstall
     result = runner(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -2534,7 +2551,7 @@ def test_restore_cleanup_refuses_managed_parent_swap_before_unlink(
     evidence_before = {path: path.read_bytes() for path in evidence_paths}
     raced_parent = hermes_dir.joinpath(*parent_parts)
     real_parent = raced_parent.with_name(f"{raced_parent.name}-real")
-    original_writer = cli._write_targets_transactionally
+    original_writer = posix_transaction._write_targets_transactionally
     injected = False
 
     def swap_parent_after_target_transaction(changes, **kwargs):
@@ -2546,7 +2563,7 @@ def test_restore_cleanup_refuses_managed_parent_swap_before_unlink(
         return result
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", swap_parent_after_target_transaction
+        posix_transaction, "_write_targets_transactionally", swap_parent_after_target_transaction
     )
 
     runner = cli._run_restore if command == "restore" else cli._run_uninstall
@@ -2654,7 +2671,7 @@ def test_restore_refuses_backup_swap_before_cleanup(tmp_path, monkeypatch):
         backup.symlink_to(symlink_target)
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", replace_backup_before_cleanup
+        posix_transaction, "_write_targets_transactionally", replace_backup_before_cleanup
     )
 
     result = cli._run_restore(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -2713,7 +2730,7 @@ def test_restore_transaction_refuses_regular_inode_target_race_and_rolls_back(
             replace_after_outer_identity_check,
         )
     else:
-        original_atomic_write = cli._atomic_write_text
+        original_atomic_write = posix_transaction._atomic_write_text
 
         def replace_after_prior_target_write(path, contents, **kwargs):
             result = original_atomic_write(path, contents, **kwargs)
@@ -2721,7 +2738,7 @@ def test_restore_transaction_refuses_regular_inode_target_race_and_rolls_back(
                 replace_raced_target()
             return result
 
-        monkeypatch.setattr(cli, "_atomic_write_text", replace_after_prior_target_write)
+        monkeypatch.setattr(posix_transaction, "_atomic_write_text", replace_after_prior_target_write)
 
     runner = cli._run_restore if command == "restore" else cli._run_uninstall
     result = runner(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -2790,7 +2807,7 @@ def test_restore_cleanup_refuses_same_inode_evidence_content_race(
     raced_contents = "# same-inode concurrent evidence rewrite\n"
     run_backup = backup_path(hermes_dir)
     install_manifest = manifest_path(hermes_dir)
-    original_writer = cli._write_targets_transactionally
+    original_writer = posix_transaction._write_targets_transactionally
     injected = False
 
     def rewrite_after_target_transaction(changes, **kwargs):
@@ -2801,7 +2818,7 @@ def test_restore_cleanup_refuses_same_inode_evidence_content_race(
         return result
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", rewrite_after_target_transaction
+        posix_transaction, "_write_targets_transactionally", rewrite_after_target_transaction
     )
 
     runner = cli._run_restore if command == "restore" else cli._run_uninstall
@@ -2891,7 +2908,7 @@ def test_install_019_rolls_back_base_when_later_gateway_write_fails(
     hermes_dir = make_exact_019_hermes(tmp_path)
     run_original = run_py(hermes_dir).read_bytes()
     base_original = base_path(hermes_dir).read_bytes()
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     writes = []
 
     def fail_gateway_after_base(path, contents, **kwargs):
@@ -2900,7 +2917,7 @@ def test_install_019_rolls_back_base_when_later_gateway_write_fails(
             raise OSError("gateway unavailable")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_gateway_after_base)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_gateway_after_base)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
@@ -2919,7 +2936,7 @@ def test_install_019_preserves_evidence_when_base_rollback_also_fails(
 ):
     hermes_dir = make_exact_019_hermes(tmp_path)
     base_original = base_path(hermes_dir).read_text(encoding="utf-8")
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     base_writes = 0
 
     def fail_gateway_and_base_rollback(path, contents, **kwargs):
@@ -2933,7 +2950,7 @@ def test_install_019_preserves_evidence_when_base_rollback_also_fails(
             raise OSError("gateway unavailable")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_gateway_and_base_rollback)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_gateway_and_base_rollback)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
@@ -2972,17 +2989,20 @@ def test_restore_019_rolls_back_base_when_gateway_restore_fails(
     patched_run = run_py(hermes_dir).read_bytes()
     patched_base = base_path(hermes_dir).read_bytes()
     manifest_before = manifest_path(hermes_dir).read_bytes()
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
+    injected = []
 
     def fail_gateway_restore(path, contents, **kwargs):
         if Path(path) == run_py(hermes_dir):
+            injected.append(path)
             raise OSError("gateway restore unavailable")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_gateway_restore)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_gateway_restore)
 
     result = cli._run_restore(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
+    assert injected == [run_py(hermes_dir)]
     assert result != 0
     assert run_py(hermes_dir).read_bytes() == patched_run
     assert base_path(hermes_dir).read_bytes() == patched_base
@@ -3245,17 +3265,20 @@ def test_install_failure_restores_run_py_and_removes_manifest_and_backup(
 ):
     hermes_dir = copy_hermes(tmp_path)
     original = run_py(hermes_dir).read_text(encoding="utf-8")
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
+    injected = []
 
     def fail_manifest(path, contents, **kwargs):
         if Path(path) == manifest_path(hermes_dir):
+            injected.append(path)
             raise OSError("manifest unavailable")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_manifest)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_manifest)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
+    assert injected == [manifest_path(hermes_dir)]
     assert result != 0
     current = run_py(hermes_dir).read_text(encoding="utf-8")
     assert current == original
@@ -3267,17 +3290,17 @@ def test_install_failure_restores_run_py_and_removes_manifest_and_backup(
 def test_install_posix_commits_all_mutations_in_one_transaction(
     tmp_path, monkeypatch
 ):
-    if not cli._cli_dirfd_binding_supported():
+    if not posix_transaction._cli_dirfd_binding_supported():
         pytest.skip("requires POSIX dirfd transaction support")
     hermes_dir = copy_hermes(tmp_path)
-    original_writer = cli._write_targets_transactionally
+    original_writer = posix_transaction._write_targets_transactionally
     calls = []
 
     def record_transaction(changes, **kwargs):
         calls.append(([path for path, _contents in changes], kwargs))
         return original_writer(changes, **kwargs)
 
-    monkeypatch.setattr(cli, "_write_targets_transactionally", record_transaction)
+    monkeypatch.setattr(posix_transaction, "_write_targets_transactionally", record_transaction)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
@@ -3293,12 +3316,12 @@ def test_install_posix_commits_all_mutations_in_one_transaction(
 
 
 def test_install_transaction_refuses_parent_swap_at_entry(tmp_path, monkeypatch):
-    if not cli._cli_dirfd_binding_supported():
+    if not posix_transaction._cli_dirfd_binding_supported():
         pytest.skip("requires POSIX dirfd transaction support")
     hermes_dir = copy_hermes(tmp_path)
     parent = run_py(hermes_dir).parent
     real_parent = parent.with_name("gateway-real")
-    original_writer = cli._write_targets_transactionally
+    original_writer = posix_transaction._write_targets_transactionally
     injected = False
 
     def swap_parent_before_transaction(changes, **kwargs):
@@ -3310,7 +3333,7 @@ def test_install_transaction_refuses_parent_swap_at_entry(tmp_path, monkeypatch)
         return original_writer(changes, **kwargs)
 
     monkeypatch.setattr(
-        cli, "_write_targets_transactionally", swap_parent_before_transaction
+        posix_transaction, "_write_targets_transactionally", swap_parent_before_transaction
     )
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -3324,7 +3347,7 @@ def test_install_transaction_refuses_parent_swap_at_entry(tmp_path, monkeypatch)
 
 
 def test_install_snapshot_precedes_original_read_parent_swap(tmp_path, monkeypatch):
-    if not cli._cli_dirfd_binding_supported():
+    if not posix_transaction._cli_dirfd_binding_supported():
         pytest.skip("requires POSIX dirfd transaction support")
     hermes_dir = copy_hermes(tmp_path)
     target = run_py(hermes_dir)
@@ -3363,7 +3386,7 @@ def test_install_rollback_unlink_stays_bound_when_parent_swaps_at_syscall(
     evidence = backup_path(hermes_dir)
     parent = evidence.parent
     real_parent = parent.with_name("gateway-real")
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
     original_unlink = cli.os.unlink
     injected = False
 
@@ -3382,7 +3405,7 @@ def test_install_rollback_unlink_stays_bound_when_parent_swaps_at_syscall(
             injected = True
         return original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_run_write)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_run_write)
     monkeypatch.setattr(cli.os, "unlink", swap_parent_at_evidence_unlink)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
@@ -4029,7 +4052,7 @@ def test_reinstall_migrates_manifestless_legacy_patch_without_dirfd_support(
     run_py(hermes_dir).write_text(legacy_patched, encoding="utf-8")
     manifest_path(hermes_dir).unlink()
     capsys.readouterr()
-    monkeypatch.setattr(cli, "_cli_dirfd_binding_supported", lambda: False)
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
 
     result = cli.main(["install", "--hermes-dir", str(hermes_dir), "--yes"])
 
@@ -4164,8 +4187,8 @@ def test_manifestless_portable_install_refuses_concurrent_gateway_edit(
     run_py(hermes_dir).write_text(legacy_patched, encoding="utf-8")
     manifest_path(hermes_dir).unlink()
     capsys.readouterr()
-    monkeypatch.setattr(cli, "_cli_dirfd_binding_supported", lambda: False)
-    original_atomic_write = cli._atomic_write_text_portable
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
+    original_atomic_write = file_transaction._atomic_write_text_portable
     injected = False
 
     def edit_before_write(path, contents, **kwargs):
@@ -4175,11 +4198,12 @@ def test_manifestless_portable_install_refuses_concurrent_gateway_edit(
             path.write_text(legacy_patched + "\nUSER_EDIT = True\n", encoding="utf-8")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text_portable", edit_before_write)
+    monkeypatch.setattr(file_transaction, "_atomic_write_text_portable", edit_before_write)
 
     result = cli.main(["install", "--hermes-dir", str(hermes_dir), "--yes"])
 
     captured = capsys.readouterr()
+    assert injected
     assert result != 0, captured.out
     assert "USER_EDIT = True" in run_py(hermes_dir).read_text(encoding="utf-8")
     assert not manifest_path(hermes_dir).exists()
@@ -4199,13 +4223,15 @@ def test_manifestless_portable_rollback_preserves_concurrent_gateway_edit(
     run_py(hermes_dir).write_text(legacy_patched, encoding="utf-8")
     manifest_path(hermes_dir).unlink()
     capsys.readouterr()
-    monkeypatch.setattr(cli, "_cli_dirfd_binding_supported", lambda: False)
-    original_atomic_write = cli._atomic_write_text_portable
+    monkeypatch.setattr(posix_transaction, "_cli_dirfd_binding_supported", lambda: False)
+    original_atomic_write = file_transaction._atomic_write_text_portable
     gateway_written = False
+    injected = False
 
     def fail_after_gateway_write(path, contents, **kwargs):
-        nonlocal gateway_written
+        nonlocal gateway_written, injected
         if path == manifest_path(hermes_dir) and gateway_written:
+            injected = True
             run_py(hermes_dir).write_text(
                 current_patched + "\nCONCURRENT_EDIT = True\n",
                 encoding="utf-8",
@@ -4216,11 +4242,12 @@ def test_manifestless_portable_rollback_preserves_concurrent_gateway_edit(
             gateway_written = True
         return result
 
-    monkeypatch.setattr(cli, "_atomic_write_text_portable", fail_after_gateway_write)
+    monkeypatch.setattr(file_transaction, "_atomic_write_text_portable", fail_after_gateway_write)
 
     result = cli.main(["install", "--hermes-dir", str(hermes_dir), "--yes"])
 
     captured = capsys.readouterr()
+    assert gateway_written and injected
     assert result != 0, captured.out
     assert "CONCURRENT_EDIT = True" in run_py(hermes_dir).read_text(encoding="utf-8")
     assert backup_path(hermes_dir).exists()
@@ -4564,17 +4591,20 @@ def test_existing_manifest_survives_manifest_rewrite_failure(tmp_path, monkeypat
     assert install_result.returncode == 0, install_result.stderr
     old_manifest = manifest_path(hermes_dir).read_text(encoding="utf-8")
 
-    original_atomic_write = cli._atomic_write_text
+    original_atomic_write = posix_transaction._atomic_write_text
+    injected = []
 
     def fail_atomic_write(path, contents, **kwargs):
         if Path(path) == manifest_path(hermes_dir):
+            injected.append(path)
             raise OSError("atomic manifest write failed")
         return original_atomic_write(path, contents, **kwargs)
 
-    monkeypatch.setattr(cli, "_atomic_write_text", fail_atomic_write, raising=False)
+    monkeypatch.setattr(posix_transaction, "_atomic_write_text", fail_atomic_write)
 
     result = cli._run_install(Namespace(hermes_dir=str(hermes_dir), yes=True))
 
+    assert injected == [manifest_path(hermes_dir)]
     assert result != 0
     assert manifest_path(hermes_dir).read_text(encoding="utf-8") == old_manifest
 

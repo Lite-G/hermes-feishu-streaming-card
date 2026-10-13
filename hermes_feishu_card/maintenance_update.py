@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .runtime_ownership import python_executable_identity as _python_executable_identity
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
@@ -1690,17 +1692,6 @@ def _wait_for_ready_health(
         sleep(min(1.0, max(0.0, deadline - monotonic())))
 
 
-def _python_executable_identity(executable: Path) -> str:
-    path = Path(executable).expanduser()
-    try:
-        canonical_parent = path.parent.resolve(strict=False)
-    except (OSError, RuntimeError):
-        canonical_parent = path.parent.absolute()
-    canonical = os.path.normcase(str(canonical_parent / path.name))
-    material = b"hermes-feishu-streaming-card:python-executable:v1\0" + os.fsencode(
-        canonical
-    )
-    return f"python-sha256:{hashlib.sha256(material).hexdigest()}"
 
 
 def _cli_command(

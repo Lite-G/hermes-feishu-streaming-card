@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict
 
 from aiohttp import ClientSession, ClientTimeout, web
 
-from .runtime_ownership import runtime_target_identity
+from .runtime_ownership import runtime_target_identity, python_executable_identity
 from .bots import RouteResult
 from .card_limits import inspect_card_limits
 from .config import (
@@ -32,6 +32,14 @@ from .config import (
     merge_card_config,
     resolve_operations_hermes_root,
 )
+from .delivery import CardDeliveryResult
+from .config_snapshot import (
+    CONTROL_CARD_CONFIG_PATH, SNAPSHOT_SCHEMA, ConfigSnapshotUnavailable,
+    config_path_identity, loaded_reading_values, scope_identity,
+)
+from .terminal_delivery import (
+    TerminalDeliveryPlan, TerminalTarget, deliver_terminal,
+)
 from .delivery_policy import (
     CARD_DISPOSITION,
     ChatDeliveryDecision,
@@ -40,6 +48,38 @@ from .delivery_policy import (
 )
 from .diagnostics import DiagnosticFinding, DiagnosticReport, build_diagnostic_report
 from .events import EventValidationError, SidecarEvent
+from .interaction_input import (
+    InteractionInputError, parse_choice,
+    parse_form_action_name as _parse_form_action_name,
+    extract_action_value as _extract_action_value,
+    extract_form_value as _extract_form_value,
+    extract_callback_chat_id as _extract_callback_chat_id,
+    extract_callback_profile_id as _extract_callback_profile_id,
+    extract_operator_open_id as _extract_operator_open_id,
+    extract_operator_name as _extract_operator_name,
+)
+from .event_rules import (
+    active_session_key, resolve_session_key, session_alias_assignments,
+    TERMINAL_EVENTS,
+    TURN_REOPENING_EVENTS,
+    SESSION_CREATING_EVENTS,
+    PROFILE_ID_PATTERN,
+    session_key as _session_key,
+    policy_profile_id as _policy_profile_id,
+    session_key_for_message_id as _session_key_for_message_id,
+    session_alias_keys_for_event as _session_alias_keys_for_event,
+    event_for_session as _event_for_session,
+    thread_id_for_event as _thread_id_for_event,
+    reply_to_message_id_for_event as _reply_to_message_id_for_event,
+    reply_in_thread_for_event as _reply_in_thread_for_event,
+    delivery_kind as _delivery_kind,
+    is_independent_notice_event as _is_independent_notice_event,
+    is_redirect_followup_event as _is_redirect_followup_event,
+    is_compaction_session_start as _is_compaction_session_start,
+    event_is_terminal as _event_is_terminal,
+    safe_profile_id as _safe_profile_id,
+    would_apply as _would_apply,
+)
 from .event_auth import (
     EventAuthenticationError,
     EventProofVerifier,
@@ -62,16 +102,21 @@ from .lifecycle import (
     cleanup_runtime_state,
 )
 from .metrics import SidecarMetrics
+from .observations import timing_summary
+from .interaction_rules import ApprovalWindowState, approval_window_can_reopen
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
+from .native_admission import (
+    NativeTerminalSnapshot,
+    admit_native_handoff,
+    event_starts_new_lifecycle as _event_starts_new_lifecycle,
+    native_handoff_ack_capable,
+    native_handoff_identity as _native_handoff_identity,
+    native_handoff_metadata as _native_handoff_metadata,
+)
 from .native_handoff import (
     NativeHandoffRecord,
     NativeHandoffStore,
     NativeHandoffStoreError,
-    derive_native_handoff_content_hash,
-    derive_native_handoff_target_hash,
-    derive_native_handoff_uuid_seed,
-    handoff_identity_key,
-    is_exact_native_text_scope,
 )
 from .operations import (
     OperationRecord,
@@ -105,7 +150,7 @@ from .legacy_owner import (auxiliary_receipt_card, legacy_owner_body,
 from .status import StatusConfig
 from .subscription_usage import fetch_codex_subscription_usage, uses_codex_subscription
 from .render_options import card_render_options
-from .presentation import task_observation_delay
+from .card_view import task_observation_delay
 from .install.detect import HermesDetection, detect_hermes
 from .install.integrity import IntegrityRepairRefused, plan_integrity_repair
 from .install.recovery import execute_recovery, plan_recovery
@@ -230,6 +275,7 @@ CARD_TITLE_KEY = web.AppKey("card_title", str)
 BASE_CARD_CONFIG_KEY = web.AppKey("base_card_config", dict)
 OPERATIONS_STORE_KEY = web.AppKey("operations_store", OperationStore)
 OPERATIONS_CONFIG_PATH_KEY = web.AppKey("operations_config_path", Path)
+LOADED_CONFIG_PATH_IDENTITY_KEY = web.AppKey("loaded_config_path_identity", str)
 OPERATIONS_ENV_FILE_KEY = web.AppKey("operations_env_file", Any)
 OPERATIONS_SHARED_SOURCE_KEY = web.AppKey("operations_shared_source", bool)
 OPERATIONS_HERMES_HOME_KEY = web.AppKey("operations_hermes_home", Path)
@@ -283,32 +329,8 @@ MAX_CONCURRENT_OPERATION_DIAGNOSTICS = 4
 OPERATIONS_DIAGNOSTIC_TIMEOUT_SECONDS = 12.0
 RESTART_CALLBACK_GRACE_SECONDS = 0.25
 _STABLE_PROFILE_SOURCES = PROFILE_SOURCES
-TERMINAL_EVENTS = {"message.completed", "message.failed"}
-TURN_REOPENING_EVENTS = {"thinking.delta", "tool.updated", "answer.delta"}
-SESSION_CREATING_EVENTS = {
-    "thinking.delta",
-    "tool.updated",
-    "answer.delta",
-    "message.completed",
-    "message.failed",
-    "system.notice",
-    "interaction.requested",
-}
 DIAGNOSTICS_KEY = web.AppKey("diagnostics", dict)
-PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class CardDeliveryResult:
-    message_id: str | None
-    outcome: str
-    retry_count: int = 0
-    error_kind: str = ""
-
-    @property
-    def delivered(self) -> bool:
-        return self.outcome == "delivered" and bool(self.message_id)
 
 
 class _OperationsDiagnosticCapacityError(RuntimeError):
@@ -647,6 +669,7 @@ def create_app(
         or Path.home() / ".hermes_feishu_card" / "config.yaml"
     ).expanduser()
     app[OPERATIONS_CONFIG_PATH_KEY] = operations_config
+    app[LOADED_CONFIG_PATH_IDENTITY_KEY] = config_path_identity(operations_config)
     app[OPERATIONS_ENV_FILE_KEY] = (
         Path(operations_env_file).expanduser()
         if operations_env_file is not None
@@ -679,6 +702,7 @@ def create_app(
     app[CARD_TITLE_KEY] = title if isinstance(title, str) else "Hermes Agent"
     app.router.add_get("/health", _health)
     app.router.add_post("/control/shutdown", _control_shutdown)
+    app.router.add_post(CONTROL_CARD_CONFIG_PATH, _control_card_config)
     app.router.add_get("/messages/{message_id}/summary", _message_summary)
     app.router.add_get("/interactions/{interaction_id}", _interaction_result)
     app.router.add_post("/card/actions", _card_actions)
@@ -891,6 +915,7 @@ async def _health(request: web.Request) -> web.Response:
         "package_version": request.app[PACKAGE_VERSION_KEY],
         "python_identity": request.app[PYTHON_IDENTITY_KEY],
         "metrics": metrics.snapshot(),
+        "timing": timing_summary(session.observation for session in sessions.values()),
         "reply_index": {
             "entries": len(request.app[CARD_SUMMARIES_KEY]),
             "last_lookup": _sanitize_health_diagnostics(diagnostics.get("last_reply_lookup", {})),
@@ -940,6 +965,46 @@ async def _health(request: web.Request) -> web.Response:
         response["profiles"] = profile_stats
 
     return web.json_response(response)
+
+
+async def _control_card_config(request: web.Request) -> web.Response:
+    """Read loaded defaults through the existing private process-control boundary."""
+    expected = request.app[PROCESS_TOKEN_KEY]
+    supplied = request.headers.get("X-HFC-Process-Token", "")
+    if (
+        not request.remote or not is_loopback_host(request.remote)
+        or not expected or not supplied or not secrets.compare_digest(supplied, expected)
+    ):
+        return web.json_response({"ok": False, "error": "forbidden"}, status=403)
+    try:
+        raw = await request.read()
+        if len(raw) > 4096:
+            raise ValueError("request too large")
+        selectors = json.loads(raw)
+        if not isinstance(selectors, dict) or set(selectors) != {"profile_id", "bot_id", "config_path_hash"}:
+            raise ValueError("invalid selector")
+        profile_id, bot_id = selectors["profile_id"], selectors["bot_id"]
+        if any(not isinstance(value, str) or not value or len(value) > 256 for value in (profile_id, bot_id)):
+            raise ValueError("invalid scope")
+        if selectors["config_path_hash"] != request.app[LOADED_CONFIG_PATH_IDENTITY_KEY]:
+            return web.json_response({"ok": False, "error": "config_mismatch"}, status=409)
+        values = loaded_reading_values(
+            request.app[BASE_CARD_CONFIG_KEY], request.app[FEISHU_CLIENT_KEY],
+            profile_id=profile_id, bot_id=bot_id,
+        )
+    except ConfigSnapshotUnavailable:
+        return web.json_response({"ok": False, "error": "scope_unavailable"}, status=404)
+    except (ValueError, TypeError, UnicodeError):
+        return web.json_response({"ok": False, "error": "invalid_request"}, status=400)
+    return web.json_response({
+        "ok": True, "schema_version": SNAPSHOT_SCHEMA,
+        "config_path_hash": request.app[LOADED_CONFIG_PATH_IDENTITY_KEY],
+        "scope_hash": scope_identity(profile_id, bot_id),
+        "process_pid": os.getpid(),
+        "process_token_hash": hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+        "package_version": request.app[PACKAGE_VERSION_KEY],
+        "values": values,
+    })
 
 
 async def _control_shutdown(request: web.Request) -> web.Response:
@@ -1220,28 +1285,6 @@ async def _resolve_runtime_interaction_callback(
     return True
 
 
-def _parse_form_action_name(payload: dict[str, Any]) -> tuple[str, str] | None:
-    """Identify a clarify form submit from the button name.
-
-    Form-submit buttons cannot carry behaviors callbacks, so render.py
-    encodes the callback token into the button name:
-      hfc_confirm_<callback_token>  (multi-select confirm / combined submit)
-      hfc_other_<callback_token>    (free-text Other submit)
-    Returns (mode, callback_token) or None when the action isn't a clarify
-    form submit.
-    """
-    event = payload.get("event") if isinstance(payload, dict) else None
-    action = event.get("action") if isinstance(event, dict) else None
-    name = str(action.get("name") or "").strip() if isinstance(action, dict) else ""
-    if name.startswith("hfc_confirm_"):
-        token = name[len("hfc_confirm_"):].strip()
-        return ("confirm", token) if token else None
-    if name.startswith("hfc_other_"):
-        token = name[len("hfc_other_"):].strip()
-        return ("other", token) if token else None
-    return None
-
-
 async def _interaction_action(
     request: web.Request,
     payload: dict[str, Any],
@@ -1305,63 +1348,14 @@ async def _interaction_action(
         return await _resume_paused_approval(request, session_key, session, interaction, token, callback_chat_id)
     allowed_values = {option.value for option in interaction.options}
     form_value = _extract_form_value(payload)
-    if mode == "confirm":
-        # Multi-select form submit: action.form_value.hfc_multi is a list of
-        # selected option values. If the user ALSO typed a custom answer in
-        # hfc_other, both are returned: the typed text is appended as
-        # "[自定义] <text>" so the agent sees the selections AND the note.
-        # Selections serialize as JSON so the gateway-side
-        # clarify_tool._parse_multi_select_response can split reliably.
-        typed = str(form_value.get("hfc_other") or "").strip()
-        raw = form_value.get("hfc_multi")
-        if raw is None:
-            raw = []
-        selected = raw if isinstance(raw, list) else ([raw] if raw != "" else [])
-        selected = [str(s).strip() for s in selected if str(s).strip()]
-        if any(item not in allowed_values for item in selected):
-            return web.json_response(
-                {"ok": False, "error": "invalid choice"}, status=400
-            )
-        if typed and not interaction.allow_custom_input:
-            return web.json_response(
-                {"ok": False, "error": "custom input not allowed"}, status=400
-            )
-        if typed:
-            if selected:
-                combined = selected + [f"[自定义] {typed}"]
-                choice = json.dumps(combined, ensure_ascii=False)
-                choice_label = ", ".join(combined)
-            else:
-                choice = typed
-                choice_label = typed
-        else:
-            choice = json.dumps(selected, ensure_ascii=False)
-            choice_label = ", ".join(selected) if selected else "(未选择)"
-    elif mode == "other":
-        # Free-text 'Other' answer: action.form_value.hfc_other holds the
-        # user's typed input.
-        if not interaction.allow_custom_input:
-            return web.json_response(
-                {"ok": False, "error": "custom input not allowed"}, status=400
-            )
-        typed = str(form_value.get("hfc_other") or "").strip()
-        if not typed:
-            return web.json_response(
-                {"ok": False, "error": "empty other answer", "toast": {"type": "warning", "content": "请输入内容后再提交"}},
-                status=400,
-            )
-        choice = typed
-        choice_label = typed
-    else:
-        # Direct single-select button click (legacy path).
-        choice = str(value.get("choice") or "").strip()
-        choice_label = str(value.get("choice_label") or choice).strip()
-        if not choice:
-            return web.json_response({"ok": False, "error": "invalid action"}, status=400)
-        if not interaction.allow_custom_input and choice not in allowed_values:
-            return web.json_response(
-                {"ok": False, "error": "invalid choice"}, status=400
-            )
+    try:
+        selection = parse_choice(
+            value, form_value, mode=mode, allowed_values=allowed_values,
+            allow_custom_input=interaction.allow_custom_input,
+        )
+    except InteractionInputError as exc:
+        return web.json_response(exc.payload(), status=400)
+    choice, choice_label = selection.value, selection.label
 
     user_name = _extract_operator_name(payload)
     data = {
@@ -4168,219 +4162,15 @@ def _hfc_group_context_lines(event: SidecarEvent, route: RouteResult) -> list[st
     return lines
 
 
-def _session_key(event: SidecarEvent) -> str:
-    """Return the session key for an event.
-
-    When profiles are active, uses composite key profile_id:message_id.
-    Otherwise uses message_id directly (backward compatible).
-    """
-    return _session_key_for_message_id(event, event.canonical_turn_id)
-
-
-def _policy_profile_id(event: SidecarEvent) -> str | None:
-    data = event.data if isinstance(event.data, dict) else {}
-    if "profile_id" not in data:
-        return ""
-    raw_profile_id = data.get("profile_id")
-    if not isinstance(raw_profile_id, str):
-        return None
-    candidate = raw_profile_id.strip()
-    if not candidate:
-        return "default"
-    if PROFILE_ID_PATTERN.fullmatch(candidate):
-        return candidate
-    return None
-
-
-def _session_key_for_message_id(event: SidecarEvent, message_id: str) -> str:
-    has_profile_id = isinstance(event.data, dict) and "profile_id" in event.data
-    profile_id = _safe_profile_id(event.data.get("profile_id") if has_profile_id else None)
-    if has_profile_id:
-        return f"{profile_id}:{message_id}"
-    return message_id
-
-
-def _session_alias_keys_for_event(event: SidecarEvent) -> list[str]:
-    data = event.data if isinstance(event.data, dict) else {}
-    aliases: list[str] = []
-    for field in ("reply_to_message_id", "parent_message_id", "quote_message_id"):
-        value = data.get(field)
-        if isinstance(value, str) and value.startswith("om_"):
-            aliases.append(_session_key_for_message_id(event, value))
-    return aliases
-
-
-def _native_handoff_identity(event: SidecarEvent) -> str:
-    data = event.data if isinstance(event.data, dict) else {}
-    raw_profile_id = data.get("profile_id")
-    profile_id = raw_profile_id.strip() if isinstance(raw_profile_id, str) else ""
-    return handoff_identity_key(
-        profile_id=profile_id,
-        chat_id=event.chat_id,
-        conversation_id=event.conversation_id,
-        message_id=event.canonical_turn_id,
-    )
-
-
-def _native_handoff_metadata(event: SidecarEvent) -> dict[str, Any]:
-    data = event.data if isinstance(event.data, dict) else {}
-    value = data.get("native_handoff")
-    if not isinstance(value, dict):
-        return {}
-    generation = value.get("generation")
-    if (
-        not isinstance(generation, str)
-        or re.fullmatch(r"[0-9a-f]{32,64}", generation) is None
-    ):
-        return {}
-    normalized: dict[str, Any] = {"generation": generation}
-    capabilities = value.get("capabilities")
-    if isinstance(capabilities, list) and all(
-        isinstance(item, str) and len(item) <= 64 for item in capabilities
-    ):
-        normalized["capabilities"] = tuple(capabilities)
-    obligation_key = value.get("obligation_key")
-    if (
-        isinstance(obligation_key, str)
-        and re.fullmatch(r"[0-9a-f]{64}", obligation_key) is not None
-    ):
-        normalized["obligation_key"] = obligation_key
-    for field in ("content_hash", "plan_fingerprint", "target_hash"):
-        field_value = value.get(field)
-        if (
-            isinstance(field_value, str)
-            and re.fullmatch(r"[0-9a-f]{64}", field_value) is not None
-        ):
-            normalized[field] = field_value
-    provisional_uuid_seed = value.get("provisional_uuid_seed")
-    if (
-        isinstance(provisional_uuid_seed, str)
-        and re.fullmatch(r"[0-9a-f]{32}", provisional_uuid_seed) is not None
-    ):
-        normalized["provisional_uuid_seed"] = provisional_uuid_seed
-    route = value.get("route")
-    if route in {"create", "thread-create"}:
-        normalized["route"] = route
-    return normalized
-
-
 def _native_handoff_ack_capable(
     app: web.Application,
     metadata: dict[str, Any],
     event: SidecarEvent,
 ) -> bool:
-    capabilities = set(metadata.get("capabilities") or ())
-    complete = (
-        NATIVE_HANDOFF_ACK_AUTH_VERIFIER_KEY in app
-        and {
-            "native-ack-v2",
-            "stable-feishu-uuid-v2",
-            "exact-base-delivery-v1",
-        }.issubset(capabilities)
-        and re.fullmatch(
-            r"[0-9a-f]{64}", str(metadata.get("obligation_key") or "")
-        )
-        is not None
-        and re.fullmatch(
-            r"[0-9a-f]{64}", str(metadata.get("content_hash") or "")
-        )
-        is not None
-        and re.fullmatch(
-            r"[0-9a-f]{64}", str(metadata.get("plan_fingerprint") or "")
-        )
-        is not None
-        and re.fullmatch(
-            r"[0-9a-f]{64}", str(metadata.get("target_hash") or "")
-        )
-        is not None
-        and metadata.get("route") in {"create", "thread-create"}
+    # Compatibility for existing coordinator callers and contract tests.
+    return native_handoff_ack_capable(
+        NATIVE_HANDOFF_ACK_AUTH_VERIFIER_KEY in app, metadata, event,
     )
-    if not complete:
-        return False
-    data = event.data if isinstance(event.data, dict) else {}
-    if event.event != "message.completed" or not is_exact_native_text_scope(data):
-        return False
-    profile_id = str(data.get("profile_id") or "").strip()
-    profile_source = str(data.get("profile_source") or "")
-    if profile_id != "default" or profile_source.startswith("sanitized_"):
-        return False
-    route = str(metadata.get("route") or "")
-    try:
-        expected_target = derive_native_handoff_target_hash(
-            profile_id=profile_id,
-            chat_id=event.chat_id,
-            thread_id=event.thread_id,
-            route=route,
-        )
-        expected_seed = derive_native_handoff_uuid_seed(
-            obligation_key=str(metadata.get("obligation_key") or ""),
-            content_hash=str(metadata.get("content_hash") or ""),
-            plan_fingerprint=str(metadata.get("plan_fingerprint") or ""),
-            route=route,
-            target_hash=str(metadata.get("target_hash") or ""),
-        )
-    except ValueError:
-        return False
-    return (
-        metadata.get("content_hash")
-        == derive_native_handoff_content_hash(data["answer"])
-        and metadata.get("target_hash") == expected_target
-        and metadata.get("provisional_uuid_seed") == expected_seed
-    )
-
-
-def _native_terminal_matches_cached_handoff(
-    event: SidecarEvent,
-    metadata: dict[str, Any],
-    session: CardSession,
-    record: NativeHandoffRecord,
-) -> bool:
-    return (
-        str(metadata.get("generation") or "") == record.generation
-        and str(metadata.get("obligation_key") or "") == record.obligation_key
-        and str(metadata.get("content_hash") or "") == record.content_hash
-        and str(metadata.get("plan_fingerprint") or "")
-        == record.plan_fingerprint
-        and str(metadata.get("route") or "") == record.route
-        and str(metadata.get("target_hash") or "") == record.target_hash
-        and event.created_at == record.event_created_at
-    )
-
-
-def _native_terminal_matches_durable_handoff(
-    event: SidecarEvent,
-    metadata: dict[str, Any],
-    record: NativeHandoffRecord,
-) -> bool:
-    return (
-        bool(record.obligation_key)
-        and bool(record.content_hash)
-        and bool(record.plan_fingerprint)
-        and bool(record.route)
-        and str(metadata.get("generation") or "") == record.generation
-        and str(metadata.get("obligation_key") or "") == record.obligation_key
-        and str(metadata.get("content_hash") or "") == record.content_hash
-        and str(metadata.get("plan_fingerprint") or "")
-        == record.plan_fingerprint
-        and str(metadata.get("route") or "") == record.route
-        and str(metadata.get("target_hash") or "") == record.target_hash
-        and event.created_at == record.event_created_at
-    )
-
-
-def _event_starts_new_lifecycle(event: SidecarEvent) -> bool:
-    if event.event == "message.started":
-        return True
-    if _event_is_terminal(event):
-        return False
-    data = event.data if isinstance(event.data, dict) else {}
-    return data.get("lifecycle_start") is True or data.get("new_lifecycle") is True
-
-
-def _get_native_handoff(
-    app: web.Application, identity_key: str
-) -> NativeHandoffRecord | None:
-    return app[NATIVE_HANDOFF_STORE_KEY].get(identity_key)
 
 
 def _prepare_native_handoff_lifecycle(
@@ -4549,95 +4339,23 @@ def _cancel_current_native_handoff_repair(
 
 
 def _active_session_key(app: web.Application, session_key: str) -> str | None:
-    sessions: Dict[str, CardSession] = app[SESSIONS_KEY]
-    aliases: Dict[str, str] = app[SESSION_ALIASES_KEY]
-    candidates = [session_key]
-    alias = aliases.get(session_key)
-    if alias:
-        candidates.append(alias)
-    for candidate in candidates:
-        session = sessions.get(candidate)
-        if session is None:
-            continue
-        if session.status in {"completed", "failed"}:
-            continue
-        return candidate
-    return None
+    return active_session_key(app[SESSIONS_KEY], app[SESSION_ALIASES_KEY], session_key)
 
 
 def _resolve_session_key(app: web.Application, event: SidecarEvent) -> str:
-    direct_key = _session_key(event)
-    if event.turn_id:
-        if event.event == "message.started":
-            return direct_key
-        redirect_aliases: Dict[str, str] = app.get(REDIRECT_SESSION_ALIASES_KEY) or {}
-        redirect_key = redirect_aliases.get(direct_key)
-        if redirect_key:
-            active_key = _active_session_key(app, redirect_key)
-            if active_key is not None:
-                return active_key
-        return direct_key
-    active_key = _active_session_key(app, direct_key)
-    if active_key is not None:
-        return active_key
-    # A brand-new user message must ALWAYS start a fresh card, even when
-    # the user replied to (quoted) a previous message. Resolving through
-    # the reply_to alias here would route the new turn into the old card
-    # session and overwrite the previous reply's content. Alias resolution
-    # stays available for in-turn stream events (thinking/answer deltas,
-    # tool updates) whose Hermes-internal message_id may differ.
-    if event.event == "message.started":
-        return direct_key
-    if _is_independent_notice_event(event):
-        # An independent notice only joins a session that is ITSELF a notice session — never the
-        # turn's. That distinction is the whole fix, and both halves are load-bearing:
-        #
-        #   * orphaned heartbeat (no turn session for the anchor yet): the notice's own card IS the
-        #     card the turn will complete onto, so the alias MUST keep working — that is
-        #     test_orphaned_heartbeats_update_one_running_notice_card.
-        #   * live turn (a session already owns the anchor): resolving through the alias folds the
-        #     ⏳ Working line into the turn's card, where nothing can ever withdraw it —
-        #     /recall/schedule refuses an owned session card (409) and the card recall path wants
-        #     delivery_kind=="notice". The user reported exactly that ("变成卡片的时候好像不会自动
-        #     撤销了"). The notice takes its own key instead.
-        for alias_key in _session_alias_keys_for_event(event):
-            active_key = _active_session_key(app, alias_key)
-            if active_key is None:
-                continue
-            existing = app[SESSIONS_KEY].get(active_key)
-            if existing is not None and existing.delivery_kind == "notice":
-                return active_key
-        return direct_key
-    for alias_key in _session_alias_keys_for_event(event):
-        active_key = _active_session_key(app, alias_key)
-        if active_key is not None:
-            return active_key
-    return direct_key
+    return resolve_session_key(
+        event, sessions=app[SESSIONS_KEY], aliases=app[SESSION_ALIASES_KEY],
+        redirect_aliases=app.get(REDIRECT_SESSION_ALIASES_KEY) or {},
+    )
 
 
 def _register_session_aliases(
-    app: web.Application,
-    event: SidecarEvent,
-    canonical_key: str,
+    app: web.Application, event: SidecarEvent, canonical_key: str,
 ) -> None:
-    if _is_independent_notice_event(event):
-        # Register the anchor alias ONLY while nothing else owns it. The mirror of
-        # _resolve_session_key's guard, and it exists for the reverse hazard: _active_session_key
-        # consults the alias table, so an alias pointing the TURN's key (reply_to_message_id) at this
-        # notice's session would let the turn's later events drift into the heartbeat's card.
-        # When the anchor is already owned — a live turn — the notice stays separate instead.
-        if any(app[SESSIONS_KEY].get(key) is not None
-               for key in _session_alias_keys_for_event(event)):
-            return
-    aliases: Dict[str, str] = app[SESSION_ALIASES_KEY]
-    keys = {
-        _session_key(event),
-        _session_key_for_message_id(event, event.message_id),
-        *_session_alias_keys_for_event(event),
-    }
-    for alias_key in keys:
-        if alias_key and alias_key != canonical_key:
-            aliases[alias_key] = canonical_key
+    # Mutation remains in the existing serialized server boundary.
+    app[SESSION_ALIASES_KEY].update(session_alias_assignments(
+        event, canonical_key, sessions=app[SESSIONS_KEY],
+    ))
 
 
 def _cleanup_failed_session_state(
@@ -4682,63 +4400,6 @@ def _cleanup_failed_session_state(
         and app[SESSION_CARD_CONFIGS_KEY].get(session_key) is session_card_config
     ):
         app[SESSION_CARD_CONFIGS_KEY].pop(session_key, None)
-
-
-def _event_for_session(event: SidecarEvent, session: CardSession) -> SidecarEvent:
-    if (
-        event.conversation_id == session.conversation_id
-        and event.message_id == session.message_id
-    ):
-        return event
-    return replace(
-        event,
-        conversation_id=session.conversation_id,
-        message_id=session.message_id,
-    )
-
-
-def _thread_id_for_event(event: SidecarEvent) -> str | None:
-    data = event.data if isinstance(event.data, dict) else {}
-    raw_thread = (
-        event.thread_id
-        or data.get("thread_id")
-        or (event.conversation_id if event.conversation_id != event.chat_id else "")
-    )
-    if isinstance(raw_thread, str) and raw_thread.startswith(("omt_", "om_")):
-        return raw_thread
-    return None
-
-
-def _reply_to_message_id_for_event(event: SidecarEvent) -> str | None:
-    data = event.data if isinstance(event.data, dict) else {}
-    reply_to = data.get("reply_to_message_id")
-    if (
-        _reply_in_thread_for_event(event)
-        and isinstance(reply_to, str)
-        and reply_to.startswith("om_")
-    ):
-        return reply_to
-    if _thread_id_for_event(event):
-        if isinstance(reply_to, str) and reply_to.startswith("om_"):
-            return reply_to
-        if event.message_id.startswith("om_"):
-            return event.message_id
-        return None
-    if event.message_id.startswith("om_"):
-        return event.message_id
-    if isinstance(reply_to, str) and reply_to.startswith("om_"):
-        return reply_to
-    return None
-
-
-def _reply_in_thread_for_event(event: SidecarEvent) -> bool:
-    data = event.data if isinstance(event.data, dict) else {}
-    value = data.get("reply_in_thread")
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "1", "yes", "on"}
-    return False
 
 
 def _checkpoint_client_identity(app, bot_id):
@@ -4966,213 +4627,80 @@ async def _apply_event_locked_inner(
         )
     )
 
-    # A signed new-hook lifecycle token is a durable turn fence.  Record it
-    # before the per-chat policy bypass so a native started event cannot leave
-    # an older card handoff tombstone authoritative for the next completion.
-    lifecycle_fence_recorded = False
-    if starts_new_lifecycle and handoff_generation:
-        try:
-            fence_result = request.app[NATIVE_HANDOFF_STORE_KEY].record_lifecycle_fence(
-                handoff_identity,
-                generation=handoff_generation,
-                event_created_at=incoming_event.created_at,
-            )
-        except (NativeHandoffStoreError, OSError, ValueError):
-            metrics.events_rejected += 1
-            return web.json_response(
-                {"ok": False, "error": "native handoff state unavailable"},
-                status=503,
-            ), None
-        if fence_result == "stale":
-            metrics.events_ignored += 1
-            return web.json_response({"ok": True, "applied": False}), None
-        lifecycle_fence_recorded = fence_result in {"advanced", "same"}
-
-    # A duplicate terminal handoff belongs to the prior card turn even when
-    # policy has since changed. Suppress it before considering a new policy
-    # decision, but do not mutate handoff state for a genuinely native turn.
-    if event_is_terminal and not starts_new_lifecycle:
-        has_native_terminal_session = bool(
-            session is not None
-            and session.status in {"completed", "failed"}
-            and session.terminal_disposition == "native"
-        )
-        try:
-            prior_handoff = _get_native_handoff(request.app, handoff_identity)
-        except (NativeHandoffStoreError, OSError, ValueError):
+    # Generation fences and terminal dedup precede policy. The domain boundary
+    # returns cache updates independently of its final admission decision.
+    admission = admit_native_handoff(
+        incoming_event,
+        NativeTerminalSnapshot(
+            native_terminal=bool(
+                session is not None
+                and session.status in {"completed", "failed"}
+                and session.terminal_disposition == "native"
+            ),
+            cached_record=session.terminal_handoff_record if session is not None else None,
+        ),
+        ack_verifier_available=NATIVE_HANDOFF_ACK_AUTH_VERIFIER_KEY in request.app,
+        store=request.app[NATIVE_HANDOFF_STORE_KEY],
+    )
+    lifecycle_fence_recorded = admission.lifecycle_fence_recorded
+    if admission.cached_record_update is not None and session is not None:
+        session.terminal_handoff_record = admission.cached_record_update
+    if admission.fence_restored:
+        metrics.native_handoff_fence_restores += 1
+    if admission.fence_refused:
+        metrics.native_handoff_fence_restore_refusals += 1
+    if admission.kind == "reject":
+        if admission.reason == "read_unavailable":
             logger.warning("native handoff state could not be read safely")
-            metrics.native_handoff_fence_restore_refusals += 1
-            metrics.events_rejected += 1
-            return web.json_response(
-                {"ok": False, "error": "native handoff state unavailable"},
-                status=503,
-            ), None
-        cached_handoff = (
-            session.terminal_handoff_record
-            if has_native_terminal_session and session is not None
-            else None
+        metrics.events_rejected += 1
+        return web.json_response(
+            {"ok": False, "error": "native handoff state unavailable"}, status=503,
+        ), None
+    if admission.kind == "ignore_lifecycle":
+        metrics.events_ignored += 1
+        return web.json_response({"ok": True, "applied": False}), None
+    if admission.kind == "suppress_terminal":
+        metrics.events_applied += 1
+        if admission.reason == "stale_replay":
+            request.app[DIAGNOSTICS_KEY]["last_terminal_event"] = {
+                "message_id_hash": _diagnostic_id_hash(incoming_event.message_id),
+                "event": incoming_event.event,
+                "sequence": incoming_event.sequence,
+                "applied": True,
+                "disposition": "native_stale_replay",
+            }
+        return web.json_response({"ok": True, "applied": True}), None
+    if admission.kind == "use_record":
+        prior_handoff = admission.selected_record
+        assert prior_handoff is not None
+        post_lock_task = _schedule_pending_native_handoff_repair(
+            request.app,
+            handoff_identity,
+            prior_handoff,
+            feishu_message_id=feishu_message_ids.get(session_key),
+            bot_id=message_bot_ids.get(session_key),
+            card_config=request.app[SESSION_CARD_CONFIGS_KEY].get(session_key),
         )
-        if cached_handoff is not None and cached_handoff.delivery_state in {
-            "pending",
-            "acked",
-        }:
-            if not _native_terminal_matches_cached_handoff(
-                incoming_event,
-                handoff_metadata,
-                session,
-                cached_handoff,
-            ):
-                metrics.native_handoff_fence_restore_refusals += 1
-                metrics.events_rejected += 1
-                return web.json_response(
-                    {"ok": False, "error": "native handoff state unavailable"},
-                    status=503,
-                ), None
-            try:
-                prior_handoff, restored = request.app[
-                    NATIVE_HANDOFF_STORE_KEY
-                ].restore_delivery_fence_if_missing(
-                    handoff_identity,
-                    cached_handoff,
-                )
-            except (NativeHandoffStoreError, OSError, ValueError):
-                metrics.native_handoff_fence_restore_refusals += 1
-                metrics.events_rejected += 1
-                return web.json_response(
-                    {"ok": False, "error": "native handoff state unavailable"},
-                    status=503,
-                ), None
-            session.terminal_handoff_record = prior_handoff
-            if restored:
-                metrics.native_handoff_fence_restores += 1
-        if prior_handoff is not None:
-            if handoff_generation and prior_handoff.generation != handoff_generation:
-                if incoming_event.created_at > prior_handoff.event_created_at:
-                    prior_handoff = None
-                else:
-                    metrics.events_applied += 1
-                    return web.json_response(
-                        {"ok": True, "applied": True}
-                    ), None
-            if prior_handoff is not None and prior_handoff.state == "lifecycle":
-                if (
-                    handoff_generation
-                    and prior_handoff.generation == handoff_generation
-                ) or incoming_event.created_at >= prior_handoff.event_created_at:
-                    prior_handoff = None
-                else:
-                    metrics.events_applied += 1
-                    request.app[DIAGNOSTICS_KEY]["last_terminal_event"] = {
-                        "message_id_hash": _diagnostic_id_hash(
-                            incoming_event.message_id
-                        ),
-                        "event": incoming_event.event,
-                        "sequence": incoming_event.sequence,
-                        "applied": True,
-                        "disposition": "native_stale_replay",
-                    }
-                    return web.json_response(
-                        {"ok": True, "applied": True}
-                    ), None
-            if prior_handoff is not None:
-                incoming_exact = _native_handoff_ack_capable(
-                    request.app,
-                    handoff_metadata,
-                    incoming_event,
-                )
-                durable_claimed = bool(
-                    prior_handoff.delivery_state
-                    in {"pending", "acked", "uncertain"}
-                    or any(
-                        (
-                            prior_handoff.uuid_seed,
-                            prior_handoff.obligation_key,
-                            prior_handoff.content_hash,
-                            prior_handoff.plan_fingerprint,
-                            prior_handoff.route,
-                            prior_handoff.target_hash,
-                        )
-                    )
-                )
-                durable_exact = prior_handoff.has_exact_delivery_binding
-                if durable_claimed and not durable_exact:
-                    metrics.native_handoff_fence_restore_refusals += 1
-                    metrics.events_rejected += 1
-                    return web.json_response(
-                        {"ok": False, "error": "native handoff state unavailable"},
-                        status=503,
-                    ), None
-                if (incoming_exact or durable_exact) and (
-                    not incoming_exact
-                    or not durable_exact
-                    or not _native_terminal_matches_durable_handoff(
-                        incoming_event,
-                        handoff_metadata,
-                        prior_handoff,
-                    )
-                ):
-                    metrics.native_handoff_fence_restore_refusals += 1
-                    metrics.events_rejected += 1
-                    return web.json_response(
-                        {"ok": False, "error": "native handoff state unavailable"},
-                        status=503,
-                    ), None
-                try:
-                    prior_handoff = request.app[
-                        NATIVE_HANDOFF_STORE_KEY
-                    ].expire_pending(handoff_identity)
-                except (NativeHandoffStoreError, OSError, ValueError):
-                    prior_handoff = None
-                if prior_handoff is None:
-                    metrics.events_rejected += 1
-                    return web.json_response(
-                        {"ok": False, "error": "native handoff state unavailable"},
-                        status=503,
-                    ), None
-                post_lock_task = _schedule_pending_native_handoff_repair(
-                    request.app,
-                    handoff_identity,
-                    prior_handoff,
-                    feishu_message_id=feishu_message_ids.get(session_key),
-                    bot_id=message_bot_ids.get(session_key),
-                    card_config=request.app[SESSION_CARD_CONFIGS_KEY].get(session_key),
-                )
-                descriptor = prior_handoff.descriptor()
-                if descriptor is not None:
-                    metrics.events_ignored += 1
-                    response_payload = {
-                        "ok": True,
-                        "applied": False,
-                        "disposition": "native",
-                        "native_handoff": descriptor,
-                    }
-                else:
-                    metrics.events_applied += 1
-                    response_payload = {"ok": True, "applied": True}
-                request.app[DIAGNOSTICS_KEY]["last_terminal_event"] = {
-                    "message_id_hash": _diagnostic_id_hash(
-                        incoming_event.message_id
-                    ),
-                    "event": incoming_event.event,
-                    "sequence": incoming_event.sequence,
-                    "applied": descriptor is None,
-                    "disposition": (
-                        "native_pending_ack"
-                        if descriptor is not None
-                        else "native_deduplicated"
-                    ),
-                }
-                return web.json_response(response_payload), post_lock_task
-        if has_native_terminal_session:
-            # A legacy, expired, uncertain, mismatched, or otherwise
-            # non-restorable in-memory record is not authority to invent a new
-            # UUID. Fail open so Hermes retains the only remaining answer path.
-            metrics.native_handoff_fence_restore_refusals += 1
-            metrics.events_rejected += 1
-            return web.json_response(
-                {"ok": False, "error": "native handoff state unavailable"},
-                status=503,
-            ), None
+        descriptor = prior_handoff.descriptor()
+        if descriptor is not None:
+            metrics.events_ignored += 1
+            response_payload = {
+                "ok": True, "applied": False,
+                "disposition": "native", "native_handoff": descriptor,
+            }
+        else:
+            metrics.events_applied += 1
+            response_payload = {"ok": True, "applied": True}
+        request.app[DIAGNOSTICS_KEY]["last_terminal_event"] = {
+            "message_id_hash": _diagnostic_id_hash(incoming_event.message_id),
+            "event": incoming_event.event,
+            "sequence": incoming_event.sequence,
+            "applied": descriptor is None,
+            "disposition": (
+                "native_pending_ack" if descriptor is not None else "native_deduplicated"
+            ),
+        }
+        return web.json_response(response_payload), post_lock_task
 
     if session is None or reopens_completed_session:
         metrics.policy_event_checks += 1
@@ -5963,6 +5491,16 @@ async def _apply_event_locked_inner(
             bot_id=bot_id,
         )
 
+        terminal_target = TerminalTarget(
+            session_key=session_key, message_id=feishu_message_id,
+            chat_id=session.chat_id, bot_id=bot_id,
+            thread_id=_thread_id_for_event(event) or None,
+            reply_to_message_id=session.reply_to_message_id or None,
+            reply_in_thread=session.reply_in_thread,
+            profile_id=_policy_profile_id(event),
+            event=event.event, sequence=event.sequence,
+        ) if is_terminal else None
+
         async def _render_and_update() -> bool:
             # A new turn may reuse the key while this terminal PATCH retries.
             # Keep recovery content and routing bound to the accepted old turn.
@@ -6039,20 +5577,36 @@ async def _apply_event_locked_inner(
                     bounded_result = _existing_owner_render_result(request.app, latest_session, bounded_result, session_key=session_key)
                     if bounded_result.disposition == "card":
                         latest_card = bounded_result.card
-            updated = await _update_card_for_app(
-                request.app,
-                feishu_message_id,
-                latest_card,
-                bot_id,
-                notice_update=event.event == "system.notice",
-                is_current=lambda: session.display_segment.get("generation", 0) == owner_generation,
-            )
-            if not updated and is_terminal:
-                updated = await _retry_terminal_update(
-                    request.app,
-                    feishu_message_id,
-                    latest_card,
-                    bot_id,
+            if terminal_target is not None:
+                terminal_outcome = await deliver_terminal(
+                    TerminalDeliveryPlan(terminal_target, render_result.disposition, latest_card),
+                    latest_session,
+                    _AppTerminalTransport(request.app),
+                    is_current=lambda: session.display_segment.get("generation", 0) == owner_generation,
+                )
+                updated = terminal_outcome.updated
+                if terminal_outcome.superseded:
+                    request.app[DIAGNOSTICS_KEY]["last_terminal_delivery"] = {
+                        "message_id_hash": _diagnostic_id_hash(terminal_target.message_id),
+                        "event": terminal_target.event,
+                        "outcome": "superseded",
+                        "error_kind": "owner_changed",
+                    }
+                    return False
+                if terminal_outcome.recovery is not None:
+                    request.app[DIAGNOSTICS_KEY]["last_terminal_delivery"] = {
+                        "message_id_hash": _diagnostic_id_hash(terminal_target.message_id),
+                        "event": terminal_target.event,
+                        "outcome": latest_session.terminal_delivery_state,
+                        "error_kind": terminal_outcome.recovery.error_kind,
+                    }
+                if terminal_outcome.commit_native:
+                    _commit_native_handoff(request.app, handoff_identity, handoff_record)
+            else:
+                updated = await _update_card_for_app(
+                    request.app, feishu_message_id, latest_card, bot_id,
+                    notice_update=event.event == "system.notice",
+                    is_current=lambda: session.display_segment.get("generation", 0) == owner_generation,
                 )
             if updated and not is_terminal and _is_heartbeat_notice(event):
                 # Each heartbeat refresh pushes the recall deadline out; the card only goes away
@@ -6063,24 +5617,6 @@ async def _apply_event_locked_inner(
                     message_id=feishu_message_id,
                     bot_id=bot_id,
                     session=latest_session,
-                )
-            if is_terminal and render_result.disposition == "card":
-                if updated:
-                    latest_session.terminal_delivery_state = "delivered"
-                else:
-                    updated = await _recover_terminal_card(
-                        request.app, session_key, latest_session, event,
-                        latest_card, bot_id, feishu_message_id,
-                    )
-            if (
-                updated
-                and is_terminal
-                and render_result.disposition == "native"
-            ):
-                _commit_native_handoff(
-                    request.app,
-                    handoff_identity,
-                    handoff_record,
                 )
             if terminal_receipt_update is not None:
                 await terminal_receipt_update()
@@ -6378,43 +5914,40 @@ async def _settle_approval_displays(app, session_key, session):
         "retained" if remaining else "confirmed" if confirmed else "not_applicable")
 
 
-async def _recover_terminal_card(
-    app: web.Application,
-    session_key: str,
-    session: CardSession,
-    event: SidecarEvent,
-    card: dict[str, Any],
-    bot_id: str | None,
-    original_message_id: str,
-) -> bool:
-    """Deliver the final card once when all edits of its original message fail.
+class _AppTerminalTransport:
+    """Bind only delivery I/O to the app; policy stays in terminal_delivery."""
 
-    Hermes already transferred ownership on ACK; returning a late fail-open
-    response would race the native sender. Reuse the existing UUID-aware card
-    sender, with a distinct identity for this original card and terminal event.
-    """
-    if session.terminal_delivery_state != "pending":
-        return session.terminal_delivery_state in {"delivered", "recovered"}
-    session.terminal_delivery_state = "recovering"
-    delivery = await _send_card_for_app(
-        app, session.chat_id, card, bot_id,
-        thread_id=_thread_id_for_event(event) or None,
-        reply_to_message_id=session.reply_to_message_id or None,
-        reply_in_thread=session.reply_in_thread,
-        delivery_key=f"{session_key}:{original_message_id}:{event.sequence}",
-        delivery_kind="terminal-recovery",
-        profile_id=_policy_profile_id(event),
-    )
-    session.terminal_delivery_state = (
-        "recovered" if delivery.outcome == "delivered" else delivery.outcome
-    )
-    app[DIAGNOSTICS_KEY]["last_terminal_delivery"] = {
-        "message_id_hash": _diagnostic_id_hash(original_message_id),
-        "event": event.event,
-        "outcome": session.terminal_delivery_state,
-        "error_kind": delivery.error_kind,
-    }
-    return delivery.outcome == "delivered"
+    def __init__(self, app: web.Application) -> None:
+        self.app = app
+
+    async def patch(
+        self, plan: TerminalDeliveryPlan, *, is_current: Callable[[], bool]
+    ) -> bool:
+        return await _update_card_for_app(
+            self.app, plan.target.message_id, plan.card, plan.target.bot_id,
+            notice_update=plan.target.event == "system.notice",
+            is_current=is_current,
+        )
+
+    async def retry(
+        self, plan: TerminalDeliveryPlan, *, is_current: Callable[[], bool]
+    ) -> bool:
+        return await _retry_terminal_update(
+            self.app, plan.target.message_id, plan.card, plan.target.bot_id,
+            is_current,
+        )
+
+    async def recover(self, plan: TerminalDeliveryPlan) -> CardDeliveryResult:
+        target = plan.target
+        return await _send_card_for_app(
+            self.app, target.chat_id, plan.card, target.bot_id,
+            thread_id=target.thread_id,
+            reply_to_message_id=target.reply_to_message_id,
+            reply_in_thread=target.reply_in_thread,
+            delivery_key=target.recovery_key,
+            delivery_kind="terminal-recovery",
+            profile_id=target.profile_id,
+        )
 
 
 async def _maybe_send_completion_notify(
@@ -6954,11 +6487,15 @@ def _schedule_paused_approval_card(app, session_key, session, interaction):
     snapshot = copy.deepcopy(session)
     card = _render_interaction_callback_card_for_app(app, snapshot, session_key=session_key)
 
+    def current():
+        return (app[SESSIONS_KEY].get(session_key) is session
+                and session.active_interaction is interaction
+                and session.status not in {"completed", "failed"}
+                and interaction.status == "paused"
+                and interaction.pause_generation == generation)
+
     async def deliver():
-        if (app[SESSIONS_KEY].get(session_key) is not session
-                or session.active_interaction is not interaction
-                or session.status in {"completed", "failed"}
-                or interaction.status != "paused" or interaction.pause_generation != generation):
+        if not current():
             return
         bot_id = app[MESSAGE_BOT_IDS_KEY].get(session_key)
         existing_card_id = str(getattr(interaction, "feishu_message_id", "") or "")
@@ -6966,7 +6503,9 @@ def _schedule_paused_approval_card(app, session_key, session, interaction):
             # The approval card is already in front of the user: refresh it in place. Sending the
             # paused notice as its own message shows one paused approval twice (#314). A failed
             # edit keeps the same generation and retries below — never a second card.
-            refreshed = await _update_card_for_app(app, existing_card_id, card, bot_id)
+            refreshed = await _update_card_for_app(
+                app, existing_card_id, card, bot_id, is_current=current,
+            )
             result = CardDeliveryResult(
                 message_id=existing_card_id,
                 outcome="delivered" if refreshed else "not_sent",
@@ -6981,8 +6520,7 @@ def _schedule_paused_approval_card(app, session_key, session, interaction):
                 delivery_kind="interaction",
                 profile_id=session.route_profile_id,
             )
-        if (result.outcome != "delivered" and session.active_interaction is interaction
-                and interaction.status == "paused" and interaction.pause_generation == generation):
+        if result.outcome != "delivered" and current():
             # The live waiter drives recovery after a transient Feishu outage.
             # Retain the same generation/delivery UUID; never rotate consent on retry.
             interaction.pause_retry_after = time.time() + 5.0
@@ -6992,22 +6530,6 @@ def _schedule_paused_approval_card(app, session_key, session, interaction):
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     task.add_done_callback(_log_background_task_failure)
-
-
-APPROVAL_RUNTIME_HEARTBEAT_SECONDS = 15.0
-
-
-def _approval_runtime_is_waiting(interaction: Any, *, now: float | None = None) -> bool:
-    """Whether the agent that asked for this approval is still blocked on it.
-
-    The live waiter heartbeats through ``GET /interactions/{id}``; a stale heartbeat means the turn
-    that asked is gone, so no decision taken on this card would reach it.
-    """
-    checked_at = time.time() if now is None else float(now)
-    return bool(
-        interaction.last_waiter_poll_at
-        and checked_at - interaction.last_waiter_poll_at <= APPROVAL_RUNTIME_HEARTBEAT_SECONDS
-    )
 
 
 async def _resume_paused_approval(request, session_key, session, interaction, token, chat_id):
@@ -7023,10 +6545,14 @@ async def _resume_paused_approval(request, session_key, session, interaction, to
         interaction.expire()
         if interaction.status not in {"paused", "failed"}:
             return web.json_response({"ok": False, "error": "interaction not found"}, status=404)
-        if (session.status in {"completed", "failed"}
-                or interaction.status != "paused" or not interaction.pause_on_timeout
-                or interaction.runtime_admission is not None
-                or not _approval_runtime_is_waiting(interaction)):
+        window = ApprovalWindowState(
+            session_status=session.status,
+            interaction_status=interaction.status,
+            pause_on_timeout=interaction.pause_on_timeout,
+            has_runtime_admission=interaction.runtime_admission is not None,
+            last_waiter_poll_at=interaction.last_waiter_poll_at,
+        )
+        if not approval_window_can_reopen(window, now=time.time()):
             # A new card cannot resurrect a stopped runtime or expired native admission.
             # Explain the dead request in place; retain its exact scope for review.
             interaction.status = "failed"
@@ -7120,70 +6646,6 @@ async def _expire_pending_interactions(
         ):
             expired += 1
     return expired
-
-
-def _extract_action_value(payload: dict[str, Any]) -> dict[str, Any]:
-    event = payload.get("event") if isinstance(payload, dict) else None
-    action = event.get("action") if isinstance(event, dict) else None
-    value = action.get("value") if isinstance(action, dict) else None
-    if isinstance(value, dict):
-        return value
-    action = payload.get("action") if isinstance(payload, dict) else None
-    value = action.get("value") if isinstance(action, dict) else None
-    return value if isinstance(value, dict) else {}
-
-
-def _extract_form_value(payload: dict[str, Any]) -> dict[str, Any]:
-    """Extract the form container submission payload.
-
-    When a user submits a card form (form_action_type=submit), Feishu returns
-    ``action.form_value`` — a mapping of every form component's ``name`` to
-    its submitted value (string for input, list for multi_select_static)."""
-    event = payload.get("event") if isinstance(payload, dict) else None
-    action = event.get("action") if isinstance(event, dict) else None
-    form_value = action.get("form_value") if isinstance(action, dict) else None
-    if isinstance(form_value, dict):
-        return form_value
-    action = payload.get("action") if isinstance(payload, dict) else None
-    form_value = action.get("form_value") if isinstance(action, dict) else None
-    return form_value if isinstance(form_value, dict) else {}
-
-
-def _extract_callback_chat_id(payload: dict[str, Any]) -> str:
-    event = payload.get("event") if isinstance(payload, dict) else None
-    context = event.get("context") if isinstance(event, dict) else None
-    if isinstance(context, dict):
-        return str(context.get("open_chat_id") or context.get("chat_id") or "").strip()
-    return ""
-
-
-def _extract_callback_profile_id(payload: dict[str, Any]) -> str:
-    event = payload.get("event") if isinstance(payload, dict) else None
-    context = event.get("context") if isinstance(event, dict) else None
-    if not isinstance(context, dict):
-        return ""
-    return _safe_profile_id(context.get("profile_id")) if context.get("profile_id") else ""
-
-
-def _extract_operator_open_id(payload: dict[str, Any]) -> str:
-    event = payload.get("event") if isinstance(payload, dict) else None
-    operator = event.get("operator") if isinstance(event, dict) else None
-    if not isinstance(operator, dict):
-        return ""
-    return str(operator.get("open_id") or "").strip()
-
-
-def _extract_operator_name(payload: dict[str, Any]) -> str:
-    event = payload.get("event") if isinstance(payload, dict) else None
-    operator = event.get("operator") if isinstance(event, dict) else None
-    if not isinstance(operator, dict):
-        return ""
-    return str(
-        operator.get("name")
-        or operator.get("user_name")
-        or operator.get("display_name")
-        or ""
-    ).strip()
 
 
 def _find_session_by_interaction(
@@ -7281,11 +6743,6 @@ def _record_attachment_diagnostics(app: web.Application, event: SidecarEvent) ->
     }
 
 
-def _delivery_kind(event: SidecarEvent) -> str:
-    data = event.data if isinstance(event.data, dict) else {}
-    return str(data.get("delivery_kind") or "").strip().lower()
-
-
 def _skip_native_text_fallback_interaction(
     app: web.Application,
     event: SidecarEvent,
@@ -7319,52 +6776,10 @@ def _session_has_runtime_admission(session: CardSession | None) -> bool:
     )
 
 
-def _is_independent_notice_event(event: SidecarEvent) -> bool:
-    if event.event != "system.notice":
-        return False
-    data = event.data if isinstance(event.data, dict) else {}
-    scope = str(data.get("notice_scope") or "session").strip().lower()
-    delivery_kind = str(data.get("delivery_kind") or "").strip().lower()
-    return scope == "independent" or delivery_kind == "notice"
-
-
-def _is_redirect_followup_event(event: SidecarEvent) -> bool:
-    data = event.data if isinstance(event.data, dict) else {}
-    return event.event == "message.started" and data.get("redirect_followup") is True
-
-
-def _is_compaction_session_start(event: SidecarEvent) -> bool:
-    if event.event != "system.notice":
-        return False
-    data = event.data if isinstance(event.data, dict) else {}
-    return (
-        str(data.get("notice_kind") or "") == "context-compaction"
-        and str(data.get("phase") or "") == "started"
-        and data.get("create_session") is True
-        and str(data.get("notice_scope") or "session").strip().lower() == "session"
-    )
-
-
-def _event_is_terminal(event: SidecarEvent) -> bool:
-    if event.event in TERMINAL_EVENTS:
-        return True
-    if not _is_independent_notice_event(event):
-        return False
-    terminal = event.data.get("notice_terminal")
-    return not (isinstance(terminal, bool) and terminal is False)
-
-
 def _should_await_card_update(event: SidecarEvent) -> bool:
     # Hermes uses the /events response to decide whether to suppress native text.
     # Slow Feishu PATCH calls must not keep terminal events waiting.
     return False
-
-
-def _safe_profile_id(value: Any) -> str:
-    candidate = str(value or "").strip()
-    if PROFILE_ID_PATTERN.fullmatch(candidate):
-        return candidate
-    return "default"
 
 
 def _safe_positive_int(value: Any, default: int) -> int:
@@ -8372,11 +7787,16 @@ async def _update_card_for_app(
 
 
 async def _retry_terminal_update(
-    app: web.Application, message_id: str, card: dict[str, Any], bot_id: str | None
+    app: web.Application, message_id: str, card: dict[str, Any], bot_id: str | None,
+    is_current: Callable[[], bool] | None = None,
 ) -> bool:
     for delay in (1.0, 2.0, 4.0):
+        if is_current is not None and not is_current():
+            return False
         await asyncio.sleep(delay)
-        if await _update_card_for_app(app, message_id, card, bot_id):
+        if is_current is not None and not is_current():
+            return False
+        if await _update_card_for_app(app, message_id, card, bot_id, is_current=is_current):
             return True
     return False
 
@@ -8909,27 +8329,3 @@ def _full_diagnostic_hash(value: str) -> str:
     if not value:
         return ""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def python_executable_identity(executable: str | os.PathLike[str]) -> str:
-    """Return a path-free, domain-separated identity for a Python runtime."""
-    path = Path(executable).expanduser()
-    try:
-        canonical_parent = path.parent.resolve(strict=False)
-    except (OSError, RuntimeError):
-        canonical_parent = path.parent.absolute()
-    canonical = os.path.normcase(str(canonical_parent / path.name))
-    material = b"hermes-feishu-streaming-card:python-executable:v1\0" + os.fsencode(
-        canonical
-    )
-    return f"python-sha256:{hashlib.sha256(material).hexdigest()}"
-
-
-def _would_apply(session: CardSession, event: SidecarEvent) -> bool:
-    return (
-        event.conversation_id == session.conversation_id
-        and event.message_id == session.message_id
-        and event.chat_id == session.chat_id
-        and event.sequence > session.last_sequence
-        and session.status not in {"completed", "failed"}
-    )

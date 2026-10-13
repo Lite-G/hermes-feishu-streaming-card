@@ -60,3 +60,54 @@ include = ["hermes_feishu_card*"]
   "provenance.json",
   "slices/*.py",
 ]
+
+# Incremental checks cover extracted boundaries, not the archived or legacy
+# coordinators. The runtime Python floor remains >=3.9; CI tests it separately.
+[tool.ruff]
+target-version = "py39"
+include = [
+  "hermes_feishu_card/cli_reports.py",
+  "hermes_feishu_card/card_view.py",
+  "hermes_feishu_card/event_rules.py",
+  "hermes_feishu_card/native_admission.py",
+  "hermes_feishu_card/turn_events.py",
+  "hermes_feishu_card/interaction_input.py",
+  "hermes_feishu_card/interaction_rules.py",
+  "hermes_feishu_card/command_cards.py",
+  "hermes_feishu_card/support_report.py",
+  "hermes_feishu_card/config_snapshot.py",
+  "hermes_feishu_card/observations.py",
+  "hermes_feishu_card/install/ast_contracts.py",
+  "hermes_feishu_card/install/base_contracts.py",
+  "hermes_feishu_card/install/file_transaction.py",
+  "hermes_feishu_card/install/posix_transaction.py",
+  "hermes_feishu_card/delivery.py",
+  "hermes_feishu_card/terminal_delivery.py",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+  "hermes_feishu_card/cli_reports.py",
+  "hermes_feishu_card/card_view.py",
+  "hermes_feishu_card/event_rules.py",
+  "hermes_feishu_card/native_admission.py",
+  "hermes_feishu_card/turn_events.py",
+  "hermes_feishu_card/interaction_input.py",
+  "hermes_feishu_card/interaction_rules.py",
+  "hermes_feishu_card/command_cards.py",
+  "hermes_feishu_card/support_report.py",
+  "hermes_feishu_card/config_snapshot.py",
+  "hermes_feishu_card/observations.py",
+  "hermes_feishu_card/install/ast_contracts.py",
+  "hermes_feishu_card/install/base_contracts.py",
+  "hermes_feishu_card/install/file_transaction.py",
+  "hermes_feishu_card/install/posix_transaction.py",
+  "hermes_feishu_card/delivery.py",
+  "hermes_feishu_card/terminal_delivery.py",
+]
+strict = true
+follow_imports = "silent"

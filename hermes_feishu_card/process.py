@@ -405,6 +405,61 @@ def local_control_host(configured_host: str) -> str:
     return "::1" if ":" in normalized else "127.0.0.1"
 
 
+class _NoControlRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        # A private control token must never follow an HTTP redirect.
+        return None
+
+
+def fetch_loaded_card_config(
+    config_path: Path, config: dict[str, dict[str, Any]], *,
+    profile_id: str, bot_id: str,
+) -> dict[str, Any]:
+    """Read only the matching managed process; unavailable is not loaded proof."""
+    from .config_snapshot import CONTROL_CARD_CONFIG_PATH, SNAPSHOT_SCHEMA, config_path_identity, scope_identity, validated_reading_values
+
+    def unavailable(reason: str) -> dict[str, Any]:
+        return {"status": "unavailable", "reason": reason}
+
+    if _state_dir_security_error(allow_missing=False, require_private_mode=True):
+        return unavailable("private_state_unavailable")
+    record = read_pid_record()
+    if record is None or not _record_identity_valid(record) or _record_boot_is_stale(record):
+        return unavailable("owner_unverified")
+    path_hash, scope_hash = config_path_identity(config_path), scope_identity(profile_id, bot_id)
+    server = config["server"]
+    host = local_control_host(str(server["host"]))
+    url_host = f"[{host}]" if ":" in host else host
+    request = urllib.request.Request(
+        f"http://{url_host}:{server['port']}{CONTROL_CARD_CONFIG_PATH}",
+        data=json.dumps({"profile_id": profile_id, "bot_id": bot_id, "config_path_hash": path_hash}).encode("utf-8"),
+        headers={CONTROL_TOKEN_HEADER: str(record["token"]), "Content-Type": "application/json"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoControlRedirect())
+    try:
+        with opener.open(request, timeout=0.8) as response:
+            raw = response.read(65537)
+            if response.status != 200 or len(raw) > 65536:
+                return unavailable("invalid_response")
+            payload = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return unavailable("control_unavailable")
+    if (
+        not isinstance(payload, dict) or payload.get("ok") is not True
+        or payload.get("schema_version") != SNAPSHOT_SCHEMA
+        or payload.get("config_path_hash") != path_hash or payload.get("scope_hash") != scope_hash
+        or not _record_matches_health(record, payload)
+        or read_pid_record() != record
+    ):
+        return unavailable("identity_mismatch")
+    values = validated_reading_values(payload.get("values"))
+    if values is None:
+        return unavailable("invalid_values")
+    # Never include the local path, token or configured route identifiers.
+    return {"status": "verified", "values": values, "effective_for": "new_turn_defaults"}
+
+
 def migrate_legacy_pidfile_permissions() -> str:
     """Tighten a known official 0644 pidfile without replacing its inode."""
     if os.name == "nt" or not callable(getattr(os, "getuid", None)):

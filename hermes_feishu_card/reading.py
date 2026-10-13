@@ -86,6 +86,7 @@ def expand_reading_preset(card: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def explain_reading_config(
     raw: Mapping[str, Any], *, profile_id: str | None = None, bot_id: str | None = None,
+    include_scope: bool = False,
 ) -> dict[str, Any]:
     """Resolve the same config scopes as the runner, returning only safe values.
 
@@ -93,7 +94,7 @@ def explain_reading_config(
     route identifiers, user titles, or arbitrary config objects are returned.
     """
     from .config import DEFAULT_CONFIG, CARD_TEXT_SIZE_DEFAULTS, merge_card_config, normalize_text_sizes, normalize_width_mode
-    from .presentation import TASK_TEXT_SIZE_DEFAULTS
+    from .card_view import TASK_TEXT_SIZE_DEFAULTS
 
     resolved = copy.deepcopy(DEFAULT_CONFIG["card"])
     resolved["reading_preset"] = "classic"
@@ -222,7 +223,7 @@ def explain_reading_config(
         sources["hide_completed_tool_activity"] if resolved["hide_completed_tool_activity"]
         else sources[HIDE_SUCCESSFUL_TOOL_ACTIVITY]
     )
-    return {
+    report = {
         "values": values,
         "sources": {key: sources[key] for key in values},
         "text_size_sources": text_size_sources,
@@ -230,3 +231,8 @@ def explain_reading_config(
         "running_config": "not_checked",
         "note": "Read-only. Scope order: global, profile, bot; explicit fields win within each scope. These are next-load values, not proof of the running configuration. Restart the sidecar after editing YAML.",
     }
+    if include_scope:
+        # Private selector for the local control request, removed by the CLI
+        # before output. Do not publish configured profile/bot identifiers.
+        report["_selected_scope"] = {"profile_id": profile_id or "default", "bot_id": selected_bot}
+    return report
