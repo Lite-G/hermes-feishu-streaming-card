@@ -105,6 +105,8 @@ from .metrics import SidecarMetrics
 from .observations import timing_summary
 from .interaction_rules import (
     ApprovalWindowState, approval_window_can_reopen, RuntimeCallbackSnapshot,
+    callback_rejection, runtime_admission_has_expired,
+    native_text_fallback_requested, runtime_text_decline_requested,
     runtime_admission_fingerprint as _runtime_admission_fingerprint,
 )
 from .interaction_resolver import resolve_interaction
@@ -1285,17 +1287,18 @@ async def _interaction_action(
             if current_session is session
             else None
         )
-        if (
-            current_interaction is None
-            or current_interaction.interaction_id != interaction_id
-            or current_interaction.callback_token != token
-            or current_session.chat_id != callback_chat_id
-        ):
+        rejection = callback_rejection(
+            session, current_session,
+            interaction_id=interaction_id, callback_token=token,
+            chat_id=callback_chat_id,
+            delivery_pending=session_key in request.app[RUNTIME_INTERACTION_RESERVATIONS_KEY],
+        )
+        if rejection == "not_found":
             return web.json_response(
                 {"ok": False, "error": "interaction not found"},
                 status=404,
             )
-        if session_key in request.app[RUNTIME_INTERACTION_RESERVATIONS_KEY]:
+        if rejection == "delivery_pending":
             return web.json_response(
                 {"ok": False, "error": "interaction delivery pending"},
                 status=409,
@@ -6281,14 +6284,7 @@ def _expire_runtime_admission_locked(
     *,
     now: float,
 ) -> bool:
-    if interaction.status != "pending" or interaction.runtime_admission is None:
-        return False
-    descriptor = dict(interaction.runtime_admission)
-    expires_at = descriptor.get("expires_at")
-    descriptor_expired = bool(
-        type(expires_at) in (int, float) and now >= expires_at
-    )
-    if not descriptor_expired and not interaction.is_expired(now):
+    if not runtime_admission_has_expired(interaction, now=now):
         return False
     interaction.status = "failed"
     interaction.error = "交互已过期"
@@ -6598,24 +6594,20 @@ def _skip_native_text_fallback_interaction(
     app: web.Application,
     event: SidecarEvent,
 ) -> bool:
-    if event.event != "interaction.requested":
-        return False
-    data = event.data if isinstance(event.data, dict) else {}
-    fallback_policy = str(data.get("fallback_policy") or "").strip().lower()
-    if fallback_policy != "native_text":
-        return False
-    return _interaction_mode_for_session_key(app, _session_key(event)) == "text"
+    return (
+        native_text_fallback_requested(event)
+        and _interaction_mode_for_session_key(app, _session_key(event)) == "text"
+    )
 
 
 def _decline_runtime_interaction_in_text_mode(
     app: web.Application,
     event: SidecarEvent,
 ) -> bool:
-    if event.event != "interaction.requested" or type(event.data) is not dict:
-        return False
-    if type(event.data.get("_hfc_runtime_admission")) is not dict:
-        return False
-    return _interaction_mode_for_session_key(app, _session_key(event)) == "text"
+    return (
+        runtime_text_decline_requested(event)
+        and _interaction_mode_for_session_key(app, _session_key(event)) == "text"
+    )
 
 
 def _session_has_runtime_admission(session: CardSession | None) -> bool:

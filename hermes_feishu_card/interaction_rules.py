@@ -9,7 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-from typing import Any, TYPE_CHECKING, cast, Mapping
+from typing import Any, TYPE_CHECKING, cast, Mapping, Literal
+
+from .events import SidecarEvent
 
 if TYPE_CHECKING:
     from .session import CardSession, InteractionState
@@ -93,3 +95,59 @@ class RuntimeCallbackSnapshot:
                 dict(cast(Mapping[str, Any], interaction.runtime_admission))
             ) != self.fingerprint
         )
+
+
+def callback_rejection(
+    expected_session: CardSession,
+    current_session: CardSession | None,
+    *,
+    interaction_id: str,
+    callback_token: str,
+    chat_id: str,
+    delivery_pending: bool,
+) -> Literal["not_found", "delivery_pending"] | None:
+    """Classify pre-expiry rejection from the current locked owner.
+
+    Identity is checked before delivery state, so an unrelated callback cannot
+    learn the current window's reservation. No expiry or claim is committed.
+    """
+    if current_session is not expected_session or current_session is None:
+        return "not_found"
+    interaction = current_session.active_interaction
+    if (
+        interaction is None
+        or interaction.interaction_id != interaction_id
+        or interaction.callback_token != callback_token
+        or current_session.chat_id != chat_id
+    ):
+        return "not_found"
+    return "delivery_pending" if delivery_pending else None
+
+
+def runtime_admission_has_expired(interaction: InteractionState, *, now: float) -> bool:
+    """Read both deadlines, preserving exact numeric type and short-circuiting.
+
+    The caller owns the failed state, admission removal and receipt mutation.
+    A non-pending or non-runtime window cannot be expired through this rule.
+    """
+    if interaction.status != "pending" or interaction.runtime_admission is None:
+        return False
+    descriptor = dict(cast(Mapping[str, Any], interaction.runtime_admission))
+    expires_at = descriptor.get("expires_at")
+    descriptor_expired = bool(type(expires_at) in (int, float) and now >= expires_at)
+    return descriptor_expired or interaction.is_expired(now)
+
+
+def native_text_fallback_requested(event: SidecarEvent) -> bool:
+    if event.event != "interaction.requested":
+        return False
+    data = event.data if isinstance(event.data, dict) else {}
+    return str(data.get("fallback_policy") or "").strip().lower() == "native_text"
+
+
+def runtime_text_decline_requested(event: SidecarEvent) -> bool:
+    return (
+        event.event == "interaction.requested"
+        and type(event.data) is dict
+        and type(event.data.get("_hfc_runtime_admission")) is dict
+    )
