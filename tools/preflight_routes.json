@@ -324,6 +324,10 @@
     "hermes_feishu_card/maintenance_store.py": [
       "operations"
     ],
+    "hermes_feishu_card/maintenance_evidence.py": [
+      "operations",
+      "ownership"
+    ],
     "hermes_feishu_card/maintenance_update.py": [
       "operations"
     ],
