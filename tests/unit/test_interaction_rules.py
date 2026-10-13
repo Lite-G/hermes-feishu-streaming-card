@@ -118,3 +118,80 @@ def test_runtime_admission_fingerprint_is_canonical_and_rejects_non_json():
     assert runtime_admission_fingerprint(original) != runtime_admission_fingerprint({**original, 'expires_at': 101.0})
     for invalid in ({'expires_at': float('nan')}, {'unsupported': object()}, {'text': '\ud800'}):
         assert runtime_admission_fingerprint(invalid) == ''
+
+
+@pytest.mark.parametrize('change', ['none', 'equal-session', 'missing-session', 'missing-interaction', 'id', 'token', 'chat'])
+@pytest.mark.parametrize('pending', [False, True])
+def test_callback_rejection_keeps_identity_before_reservation(change, pending):
+    from hermes_feishu_card.interaction_rules import callback_rejection
+    session, interaction, _ = callback_window()
+    current = session
+    if change == 'equal-session': current = replace(session)
+    elif change == 'missing-session': current = None
+    elif change == 'missing-interaction': session.active_interaction = None
+    elif change == 'id': interaction.interaction_id = 'other'
+    elif change == 'token': interaction.callback_token = 'other'
+    elif change == 'chat': session.chat_id = 'other'
+    result = callback_rejection(session, current, interaction_id='interaction',
+                                callback_token='callback-secret', chat_id='chat', delivery_pending=pending)
+    assert result == ('not_found' if change != 'none' else 'delivery_pending' if pending else None)
+
+
+@pytest.mark.parametrize('deadline,window_expired,expected,window_calls', [
+    (100, False, True, 0), (100.0, False, True, 0), (101, False, False, 1),
+    (101, True, True, 1), (True, False, False, 1), ('99', False, False, 1),
+    (None, True, True, 1), (float('nan'), False, False, 1),
+])
+def test_runtime_deadline_exact_types_inclusive_boundary_and_short_circuit(deadline, window_expired, expected, window_calls):
+    from hermes_feishu_card.interaction_rules import runtime_admission_has_expired
+    _, interaction, _ = callback_window()
+    interaction.runtime_admission = {'expires_at': deadline}
+    calls = []
+    interaction.is_expired = lambda now: calls.append(now) or window_expired
+    before = dict(vars(interaction))
+    assert runtime_admission_has_expired(interaction, now=100.0) is expected
+    assert len(calls) == window_calls
+    assert vars(interaction) == before
+
+
+@pytest.mark.parametrize('status,admission', [('completed', {'expires_at': 0}), ('paused', {'expires_at': 0}), ('pending', None)])
+def test_runtime_deadline_does_not_touch_unowned_or_closed_windows(status, admission):
+    from hermes_feishu_card.interaction_rules import runtime_admission_has_expired
+    _, interaction, _ = callback_window()
+    interaction.status, interaction.runtime_admission = status, admission
+    def forbidden(now):
+        pytest.fail('closed/unowned window deadline queried')
+    interaction.is_expired = forbidden
+    assert not runtime_admission_has_expired(interaction, now=100)
+
+
+@pytest.mark.parametrize('kind,data,native,runtime', [
+    ('interaction.requested', {'fallback_policy': ' NATIVE_TEXT '}, True, False),
+    ('interaction.requested', {'_hfc_runtime_admission': {}}, False, True),
+    ('message.started', {'fallback_policy': 'native_text', '_hfc_runtime_admission': {}}, False, False),
+    ('interaction.requested', None, False, False),
+    ('interaction.requested', {'_hfc_runtime_admission': []}, False, False),
+])
+def test_text_request_predicates_keep_original_input_shape(kind, data, native, runtime):
+    from types import SimpleNamespace
+    from hermes_feishu_card.interaction_rules import native_text_fallback_requested, runtime_text_decline_requested
+    event = SimpleNamespace(event=kind, data=data)
+    assert native_text_fallback_requested(event) is native
+    assert runtime_text_decline_requested(event) is runtime
+
+
+def test_text_request_dict_subclass_distinction_and_mode_short_circuit(monkeypatch):
+    from types import SimpleNamespace
+    from hermes_feishu_card import server
+    from hermes_feishu_card.interaction_rules import native_text_fallback_requested, runtime_text_decline_requested
+    class Subdict(dict): pass
+    event = SimpleNamespace(event='interaction.requested', data=Subdict(fallback_policy='native_text', _hfc_runtime_admission={}))
+    assert native_text_fallback_requested(event)
+    assert not runtime_text_decline_requested(event)
+    event.data = {'_hfc_runtime_admission': Subdict()}
+    assert not runtime_text_decline_requested(event)
+    def forbidden(*args): pytest.fail('irrelevant event consulted app mode')
+    monkeypatch.setattr(server, '_interaction_mode_for_session_key', forbidden)
+    event = SimpleNamespace(event='message.started', data={})
+    assert not server._skip_native_text_fallback_interaction({}, event)
+    assert not server._decline_runtime_interaction_in_text_mode({}, event)
