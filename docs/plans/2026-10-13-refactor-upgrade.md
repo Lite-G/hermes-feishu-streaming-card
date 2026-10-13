@@ -293,3 +293,16 @@ T09 方向记录：Bailey 先选 A，随后明确改选 B「任务分区」，�
 13:50 检查点之后，独立补审另推进 T14 的一个小切口：CLI 保留恢复证据的路径规划及原 legacy 分支，已验证删除时的目录句柄、全部目标先核验、按序 unlink 与 finally 关闭统一归入 `install/posix_transaction`。这是冻结候选之后的单独增补，旧 full/wheel 不自动覆盖它。`28f4aa0` 独立 CLI install/integrity/docs/metadata 351 passed / 1 Windows 专项跳过，Ruff 与 18 模块 mypy 通过；新增 8 个实际 fd、先核验后删除、平台拒绝及失败释放测试通过。新候选普通 wheel 与云端全量仍待验收。
 
 T17 的有限慢下游/worker 轨迹保存在独立 [PR #398](https://github.com/baileyh8/hermes-feishu-streaming-card/pull/398)，源码测试提交 `562a40f`：49 项定向检查通过。三轮 1/5/20 个流式会话分别配同量交互探针，实际为 2/10/40 个总会话；终态与交互 ACK 在慢 PATCH 闸门释放前返回，最终正文隔离。实际 observer worker 的正常/503/阻塞关闭轨迹验证有界排队及释放后线程回到基线。该范围不包含生产吞吐、完整 Feishu HTTP 协议或长期驻留资源稳定性。新测试跨平台运行及进一步有限长批次采样仍待结果。
+
+
+### 继续实施：交互边界（2026-10-13，北京时间）
+
+Bailey 要求继续完成计划，前述冻结只描述当时的验收批次，后续工程继续按职责独立提交。A/B/C/E/F 精确头云端已通过；D 的现代 Python 全量通过，但 macOS 来源探测仍有一项未定位失败。G 的 Python 3.9/3.10 两项红灯来自旧 pathlib 缓存 OS 函数，导致权限故障注入未触达：`1442f0a` 补同一 accessor I/O 边界，保留拒绝和无副作用断言。本机独立 process 100 项通过；官方旧 pathlib 机制对照修前两败、修后六过，不代替原生旧解释器 CI。H 新矩阵仍待结果。
+
+T06 继续提取 `interaction_resolver`：单次认证请求不接收 app/session，不创建第二套 claim，不重试授权；server 保留指标及锁内前后身份检查。独立真实分块 HTTP 发现旧代码会把合法 JSON 前缀提前认定为成功，原函数与提取后均复现；`ccc41f4` 在原 2 秒预算内最多读取 513 字节，等 EOF 或超限后再判断。新增 17 项、相关 123 项和 server runtime interaction 12 项独立通过，计数范围有重叠可能，不作累计覆盖声明。初次 mypy 类型收窄失败已保留，随后仅用 typing.cast 表达已验证类型，不把 bool 强转成数值。
+
+`8be6f56` 将原请求身份保存为 repr 隐藏敏感字段的冻结快照，并提取 resolver 返回后的对象身份、token/chat 与 descriptor 校验。仍在重新取得原 session lock 后读取现有 owner，只有校验通过才执行原过期检查与状态提交；不改变 transport sequence 或将字段相等视为同一个对象。该提交的纯规则、竞态和静态验收继续由独立 agent 执行。
+
+T05 完整事件编排、T06 其余回执与身份分层、T07/T08 剩余职责、T11 结果导航、T14/T15 生命周期及源码家族、T18 全面清退仍继续；客户端与真实用户验收单列。未合并、发布或变更生产，旧 wheel 不能覆盖此次新 resolver 运行代码。
+
+后续 `8be6f56` 已独立通过纯规则与受控 server 竞态共 37 项、Ruff 和 19 模块 mypy；新增测试随 `9bec395` 进入实施分支。实际 claim 仍由 Hermes 原 runtime 的锁和 consumed 状态负责，侧车的快照只决定已返回结果是否仍属于原显示窗口。`be8999f` 再将辅助回执复制、脱敏、去按钮及容量检查提为不依赖 app/网络的投影；server 保留原配置/方言选择、检查点保存和投递，独立验收进行中。
