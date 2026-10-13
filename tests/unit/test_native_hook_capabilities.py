@@ -415,7 +415,15 @@ print(json.dumps({
         timeout=90,
         env={"HOME": str(runtime.parents[2])},
     )
-    return json.loads(completed.stdout)
+    result = json.loads(completed.stdout)
+    # Preserve only the runtime's bounded reason categories, never raw child
+    # stderr, exception text, command arguments or local source paths.
+    result["source_probe_failures"] = re.findall(
+        r"native source probe failed: stage=(git_head|git_status|snapshot|unknown) "
+        r"kind=(timeout|command_failed|unavailable|io_error|invalid_archive|invalid_evidence)(?=\s|$)",
+        completed.stderr,
+    )[:8]
+    return result
 
 
 def test_fixed_tag_provenance_is_one_canonical_manifest_with_24_slices():
@@ -444,7 +452,15 @@ def test_real_regular_wheel_plugin_manager_probe_reports_exactly_four_capabiliti
         "stable_tool_lifecycle",
         "approval_observe",
     }
-    assert result["reason_code"] == "verified"
+    assert result["reason_code"] == "verified", {
+        "reason_code": result["reason_code"],
+        "source_commit": (
+            result["source_commit"]
+            if re.fullmatch(r"[0-9a-f]{40}", str(result.get("source_commit", "")))
+            else "unavailable"
+        ),
+        "source_probe_failures": result["source_probe_failures"],
+    }
     assert set(result["available"]) == expected
     assert result["plugin_evidence_sha256"].startswith("sha256:")
     assert len(result["source_digests"]) == 9
