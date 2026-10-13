@@ -75,6 +75,9 @@ do not combine rebranding, broad rewrites and behavior fixes in one PR.
 - Unknown/unsupported delivery paths remain fail-open to Hermes. Once HFC has
   accepted a card path, preserve its ownership and suppress duplicate native gray
   text. Installation, authorization and uncertain filesystem mutation fail closed.
+- At process-ownership and filesystem mutation gates, distinguish missing from
+  uninspectable metadata. Use exception-aware stat/lstat and reject unexpected
+  OSError; a false exists/is_symlink result can hide errors on newer Python.
 - Preserve profile/bot/chat/thread/sender/turn boundaries. A reply alias is not a
   new turn identity, and group membership does not authorize replacing another
   sender's card. Test terminal, duplicate, late and reordered events.
