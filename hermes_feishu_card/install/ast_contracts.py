@@ -6,7 +6,7 @@ these helpers never import Hermes, execute inspected source or mutate files.
 from __future__ import annotations
 
 import ast
-from typing import Any
+from typing import Any, cast
 
 _DELIVER_ATTACHMENTS_PATTERNS = (
     # Hermes 0.21.1+: _deliver_attachments gained record_delivery= kwarg
@@ -474,6 +474,6 @@ def _is_docstring_expr(node: Any) -> bool:
     return (
         isinstance(node, ast.Expr)
         and isinstance(getattr(node, "value", None), ast.Constant)
-        and isinstance(node.value.value, str)
+        and isinstance(cast(ast.Constant, node.value).value, str)
     )
 
