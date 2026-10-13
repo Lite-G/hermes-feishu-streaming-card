@@ -57,7 +57,8 @@
       "tests/unit/test_session_store.py",
       "tests/unit/test_legacy_owner_checkpoint.py",
       "tests/integration/test_reading_presets_http.py",
-      "tests/integration/test_combined_stability.py"
+      "tests/integration/test_combined_stability.py",
+      "tests/unit/test_message_navigation.py"
     ],
     "quota": [
       "tests/unit/test_subscription_usage.py",
@@ -67,7 +68,9 @@
     "client": [
       "tests/unit/test_feishu_client.py",
       "tests/unit/test_cardkit.py",
-      "tests/integration/test_feishu_client_http.py"
+      "tests/integration/test_feishu_client_http.py",
+      "tests/unit/test_message_navigation.py",
+      "tests/integration/test_message_navigation_http.py"
     ],
     "events": [
       "tests/unit/test_events.py",
@@ -100,7 +103,8 @@
       "tests/unit/test_owner_display_policy.py",
       "tests/unit/test_interaction_preflight.py",
       "tests/unit/test_interaction_resolver.py",
-      "tests/unit/test_interaction_receipts.py"
+      "tests/unit/test_interaction_receipts.py",
+      "tests/unit/test_message_navigation.py"
     ],
     "notices": [
       "tests/unit/test_notice_lifecycle.py",
@@ -525,6 +529,14 @@
     "hermes_feishu_card/install/posix_transaction.py": [
       "install_transactions",
       "install"
+    ],
+    "tests/unit/test_message_navigation.py": [
+      "client",
+      "interaction",
+      "appearance"
+    ],
+    "tests/integration/test_message_navigation_http.py": [
+      "client"
     ]
   }
 }
