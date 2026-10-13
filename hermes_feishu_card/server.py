@@ -107,6 +107,7 @@ from .interaction_rules import (
     runtime_admission_fingerprint as _runtime_admission_fingerprint,
 )
 from .interaction_resolver import resolve_interaction
+from .interaction_receipts import build_auxiliary_receipt
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
     NativeTerminalSnapshot,
@@ -141,7 +142,6 @@ from .render import (
     _render_limit_handoff_card,
     render_card_result,
     render_legacy_interaction_callback_card,
-    mask_approval_scope,
     render_terminal_limit_handoff_card,
 )
 from .process import state_dir
@@ -149,7 +149,7 @@ from .session import CardSession
 from .approval_receipts import approval_receipt_fingerprint
 from .display_segments import display_view, needs_continuation
 from .legacy_owner import (auxiliary_receipt_card, legacy_owner_body,
-                           static_legacy_receipt, valid_auxiliary_receipt)
+                           static_legacy_receipt)
 from .status import StatusConfig
 from .subscription_usage import fetch_codex_subscription_usage, uses_codex_subscription
 from .render_options import card_render_options
@@ -4312,31 +4312,17 @@ def _checkpoint_auxiliary_receipt(app, key, session, owner_id):
     if (interaction is None or not interaction.feishu_message_id
             or interaction.feishu_message_id == owner_id):
         return None
-    snapshot = copy.copy(session)
-    snapshot.active_interaction = copy.deepcopy(interaction)
-    if interaction.status in {"pending", "paused"}:
-        snapshot.active_interaction.status = "failed"
-        snapshot.active_interaction.error = "连接已重建，原交互已失效，请重新发起请求。"
-    for name in ("prompt", "choice", "choice_label", "user_name", "error"):
-        setattr(snapshot.active_interaction, name,
-                mask_approval_scope(getattr(snapshot.active_interaction, name)))
-    for option in snapshot.active_interaction.options:
-        option.label = mask_approval_scope(option.label)
-    # The renderer masks scope secrets; the static receipt then removes every
-    # callback/control field. No waiter identity or runtime admission is saved.
-    card = static_legacy_receipt(
-        _render_interaction_callback_card_for_app(app, snapshot, session_key=key))
-    if not inspect_card_limits(card).safe:
-        raise ValueError("auxiliary display receipt exceeds bounds")
-    receipt = {"message_id": interaction.feishu_message_id, "card": card,
-               "template": "green" if snapshot.active_interaction.status == "completed" else "red",
-               "dialect": "legacy" if _interaction_mode_for_session_key(app, key) == "callback" else "2.0"}
-    if not valid_auxiliary_receipt(receipt):
-        # Never trim authorization scope to make its checkpoint fit. Delivery
-        # remains accepted while the existing diagnostics report unavailable.
-        raise ValueError("auxiliary display receipt exceeds bounds")
-    return receipt
-
+    _, card_config, title, profile_id = _session_card_render_context(
+        app, session, session_key=key,
+    )
+    return build_auxiliary_receipt(
+        session, owner_id, title=title, profile_id=profile_id,
+        presentation=card_config.get("_presentation_mode", "classic"),
+        mentions_enabled=card_interaction_mention_enabled(
+            card_config, kind=interaction.kind or "",
+        ),
+        dialect="legacy" if _interaction_mode_for_session_key(app, key) == "callback" else "2.0",
+    )
 
 async def _restore_card_checkpoints(app):
     store = app.get(SESSION_STORE_KEY)

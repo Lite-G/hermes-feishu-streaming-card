@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 from .card_limits import inspect_card_limits
 from .text import split_markdown_blocks
 
 
-def static_legacy_receipt(card):
+def static_legacy_receipt(card: dict[str, Any]) -> dict[str, Any]:
     """Keep only rendered text, never callback controls or nested values."""
     title = card.get("header", {}).get("title", {}).get("content", "Hermes Agent")
     if not isinstance(title, str):
@@ -47,7 +48,7 @@ def auxiliary_receipt_card(receipt):
     return card
 
 
-def valid_auxiliary_receipt(receipt):
+def valid_auxiliary_receipt(receipt: object) -> bool:
     """One actual message and static text only, with the shared wire limits."""
     if receipt == {}:
         return True
