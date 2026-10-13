@@ -2806,6 +2806,14 @@ def _render_operations_for_app(
         store=app[OPERATIONS_STORE_KEY],
         width_mode=_operation_width_mode(app, operation),
     )
+    # Doctor has an asynchronous operations-card path. Its report fingerprint
+    # covers installation evidence, not live delivery receipts: render this
+    # allowlisted warning afresh without changing repair authorization.
+    handoff_lines = _native_handoff_lines_for_app(app)
+    if handoff_lines:
+        card["body"]["elements"][0]["content"] += (
+            "\n\n**原生投递状态**\n" + "\n".join(handoff_lines)
+        )
     title = app[CARD_TITLE_KEY]
     if isinstance(title, str) and title.strip():
         card["header"]["title"]["content"] = title.strip()
@@ -3937,7 +3945,11 @@ def _hfc_monitor_lines(request: web.Request, event: SidecarEvent) -> list[str]:
 
 
 def _hfc_native_handoff_lines(request: web.Request) -> list[str]:
-    snapshot = _safe_native_handoff_diagnostics(request.app)
+    return _native_handoff_lines_for_app(request.app)
+
+
+def _native_handoff_lines_for_app(app: web.Application) -> list[str]:
+    snapshot = _safe_native_handoff_diagnostics(app)
     delivery_states = snapshot.get("delivery_states")
     if not isinstance(delivery_states, dict):
         delivery_states = {}
