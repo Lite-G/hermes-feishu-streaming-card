@@ -31,6 +31,10 @@ test = [
   "pytest-asyncio>=0.23",
   "tomli>=1.1.0; python_version < '3.11'",
 ]
+quality = [
+  "ruff==0.17.0; python_version >= '3.10'",
+  "mypy==2.4.0; python_version >= '3.10'",
+]
 
 [project.scripts]
 hermes-feishu-card = "hermes_feishu_card.cli:main"
