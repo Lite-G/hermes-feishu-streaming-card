@@ -111,6 +111,7 @@ from .interaction_rules import (
 )
 from .interaction_resolver import resolve_interaction
 from .interaction_receipts import build_auxiliary_receipt
+from .owner_display_policy import OwnerRefreshState
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
     NativeTerminalSnapshot,
@@ -5359,45 +5360,34 @@ async def _apply_event_locked_inner(
                 return False
             if latest_session is not session or session.display_segment.get("generation", 0) != owner_generation:
                 return False
-            # Freeze the card while an interaction is pending: Feishu card
-            # updates are full replacements, so any PATCH resets the
-            # multi-select dropdown and the free-text input, wiping the
-            # user's in-progress answer. Only interaction lifecycle events
-            # (completed/failed) may update the card in that state.
             interaction = latest_session.active_interaction
-            if (
-                interaction is not None
-                and interaction.status in {"pending", "paused"}
-                and not is_terminal
-                and not str(event.event or "").startswith("interaction.")
-            ):
+            refresh = OwnerRefreshState(
+                event_kind=event.event,
+                is_terminal=is_terminal,
+                owner_message_id=feishu_message_id,
+                interaction_present=interaction is not None,
+                interaction_status=interaction.status if interaction is not None else None,
+                interaction_message_id=interaction.feishu_message_id if interaction is not None else "",
+                has_receipt_fingerprint=bool(interaction and interaction.receipt_fingerprint),
+                has_legacy_owner_receipt=bool(latest_session.legacy_owner_receipt),
+            )
+            # Full replacement would wipe in-progress form input.
+            if refresh.freezes_inputs:
                 return False
             latest_card = render_result.card
-            if (event.event == "interaction.failed" and interaction is not None
-                    and interaction.receipt_fingerprint):
+            if refresh.refresh_failed_receipt_first:
                 latest_card = _render_session_card_for_app(
                     request.app, latest_session, session_key=session_key)
-            if (str(event.event).startswith("interaction.")
-                    and interaction is not None
-                    and interaction.feishu_message_id
-                    and interaction.feishu_message_id != feishu_message_id
-                    and (latest_session.legacy_owner_receipt
-                         or _interaction_mode_for_session_key(request.app, session_key) == "text")):
-                # The dedicated receipt was updated above. Do not repaint
-                # an older receipt/owner with this newer question's state.
+            card_source = refresh.card_source(
+                lambda: _interaction_mode_for_session_key(request.app, session_key)
+            )
+            if card_source == "separate_receipt":
                 return True
-            if (str(event.event).startswith("interaction.")
-                    and interaction is not None
-                    and interaction.feishu_message_id == feishu_message_id
-                    and _interaction_mode_for_session_key(request.app, session_key) == "callback"):
+            if card_source == "callback_owner":
                 latest_card = _render_interaction_callback_card_for_app(
                     request.app, latest_session, session_key=session_key
                 )
-            elif (str(event.event).startswith("interaction.")
-                    and interaction is not None
-                    and interaction.status not in {"pending", "paused"}
-                    and interaction.feishu_message_id == feishu_message_id
-                    and _interaction_mode_for_session_key(request.app, session_key) == "text"):
+            elif card_source == "text_receipt_owner":
                 latest_card = _render_static_display_card(
                     request.app, copy.deepcopy(latest_session), session_key=session_key,
                     note="交互结果已记录，后续进展以回复卡为准",

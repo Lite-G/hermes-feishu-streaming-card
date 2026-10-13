@@ -505,6 +505,10 @@
       "interaction",
       "runtime"
     ],
+    "hermes_feishu_card/owner_display_policy.py": [
+      "interaction",
+      "appearance"
+    ],
     "hermes_feishu_card/interaction_rules.py": [
       "interaction",
       "runtime"
