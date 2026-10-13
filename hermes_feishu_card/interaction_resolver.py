@@ -104,9 +104,15 @@ async def resolve_interaction(
                         return ResolutionOutcome("invalid_response")
                     if not 0 <= declared <= MAX_RUNTIME_INTERACTION_RESPONSE_BYTES:
                         return ResolutionOutcome("invalid_response")
-                raw = await response.content.read(
-                    MAX_RUNTIME_INTERACTION_RESPONSE_BYTES + 1
-                )
+                # read(n) may return a valid JSON prefix before the response
+                # ends. Wait for EOF, or one byte beyond the bounded budget,
+                # under the existing whole-request timeout.
+                try:
+                    raw = await response.content.readexactly(
+                        MAX_RUNTIME_INTERACTION_RESPONSE_BYTES + 1
+                    )
+                except asyncio.IncompleteReadError as exc:
+                    raw = exc.partial
     except asyncio.CancelledError:
         raise
     except (asyncio.TimeoutError, TimeoutError):
