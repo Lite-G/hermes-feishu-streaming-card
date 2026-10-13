@@ -9,7 +9,7 @@
 | native terminal admission、重复终态与持久 fence 衔接 | `native_admission` | 只依赖原始事件、owner 快照与四方法 store port；server 保留 policy、cache 提交、HTTP/指标与 repair 调度 |
 | 原 Hermes resolver 的单次认证 HTTP 请求 | `interaction_resolver` | server 在原锁内验证 owner、锁外请求、重新入锁校验对象/token/descriptor，再应用结果；指标与 HTTP 回执仍由 server 管理 |
 | 选择值与表单解析 | `interaction_input` | server/SDK 继续负责身份、过期、claim 和原 Hermes resolver |
-| 回调拒绝分类、双时限、文本回退请求资格、审批窗口及返回后原 owner 校验 | `interaction_rules` | server 在原锁内读取 owner、执行 expiry/状态提交；身份拒绝先于投递占位，模式解析保持短路，网络返回后重新加锁校验冻结身份；重展不执行 resolver |
+| 交互容量预检、回调拒绝分类、双时限、文本回退请求资格、审批窗口及返回后原 owner 校验 | `interaction_rules` | server 在原锁内读取 owner、执行 expiry/状态提交；身份拒绝先于投递占位，模式解析保持短路，网络返回后重新加锁校验冻结身份；重展不执行 resolver |
 | 辅助交互回执的只读投影 | `interaction_receipts` | server 选择已加载配置、实际 owner/dialect，负责保存和投递；纯投影保留原内容，剥离操作/token，超限拒绝而不截断授权范围 |
 | task 状态投影、颜色语义 | `card_view` | `presentation` 修改已知显示字段；不改执行或授权状态 |
 | 正文的完整来源与显示表示 | `content_plan`、`native_tables`、`text` | renderer 组合卡片并由共享 serializer 裁决最终容量 |
@@ -56,3 +56,5 @@ native admission 的有 generation fence 与终态去重仍先于 policy；无 g
 交互 resolver 只返回受限结果，不接收 app/session、不重试、不更新授权。取消原样传播，由 server 记录取消指标；网络成功仍须通过原身份复核，不可据此直接写入新一轮交互。
 
 resolver 按原 2 秒预算读取完整响应，最多缓存 513 字节；未到 EOF 的合法 JSON 前缀不作为成功回执。失败统计由调用方每次请求记录一次，连接清理异常不会重复计数。
+
+交互容量预检由 `interaction_rules.interaction_preflight_rejection` 持有：仅对交互请求复制原会话或创建未注册的预演会话，按原 sequence 规则 apply，再调用注入的展示函数。重复事件不渲染；非 card 结果拒绝接管。server 保留配置读取、原锁、拒绝指标、HTTP 响应及后续实际 apply，预演对象从不成为真实 owner。

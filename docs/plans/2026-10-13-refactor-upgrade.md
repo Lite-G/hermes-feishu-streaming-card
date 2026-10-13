@@ -318,3 +318,7 @@ Gateway 来源契约独立 218 项定向通过；另 143 项通过、7 项缺失
 Cron 后续独立 387 项通过，覆盖新定位规则、完整 patcher/decomposed 及文档；最终 6137f45 的 docs/metadata/preflight133项与 Ruff/mypy22模块通过。首次 mypy 的 AST 类型收窄错误及仅 typing.cast 的修复保留；未改变匹配规则。当前完整源码家族整理仍不止这些接点，普通 wheel 与最终 CI 需覆盖 Gateway/Cron 新模块后才能进入发行判断。
 
 T06 的 ee039e8 继续隔离前置 callback 拒绝分类、runtime/窗口双时限以及两个文本回退请求谓词。原 session 对象/id/token/chat 先于投递占位，exact int/float deadline 仍拒绝 bool 替代值；过期 mutation、profile 检查和 HTTP 优先级保持原位。716276e 的独立测试覆盖 31 个新规则与既有实际 HTTP，共77项通过，Ruff/mypy22模块通过；已与普通mode lookup短路和dict subclass差异对照。新普通包与最终CI仍需绑定该运行版本，真实点击尚未验。
+
+T05 的 `ec3d557` 提取交互容量预检，保留 copy/new → apply → render 的顺序；配置读取、锁、指标与实际状态提交仍在 server。独立验收正在补齐拒绝后不注册会话、不修改原 owner/sequence、重复事件不渲染与副本隔离的证据，当前不计作已验收。
+
+后续证据更新：H `adb3486` 与 I `6de9843` 的云端 tests/CodeQL 已全部通过，原生 Python 3.9/3.10 各为 H 5416 passed / 35 skipped、I 5473 passed / 35 skipped。L `472c2fc` 普通 wheel 的 122 个资源与源码、实际安装一致，SHA256 为 `4d4013523f443931a2c1a6bf4978ee5e14d6ca52a86b69eedcb741abfd451a95`；外部 `-I` 验证规则/server20项与真实HTTP5项。沿用 K 的 synthetic fixture CLI 验证仅限未变资源；完整 fixed Hermes checkout 因缺少可验证 runtime Python 未通过真实安装，未绕过门禁。客户端验收仍未完成。
