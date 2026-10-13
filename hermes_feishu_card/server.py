@@ -68,7 +68,6 @@ from .event_rules import (
     session_key as _session_key,
     policy_profile_id as _policy_profile_id,
     session_key_for_message_id as _session_key_for_message_id,
-    session_alias_keys_for_event as _session_alias_keys_for_event,
     event_for_session as _event_for_session,
     thread_id_for_event as _thread_id_for_event,
     reply_to_message_id_for_event as _reply_to_message_id_for_event,
@@ -97,6 +96,7 @@ from .event_auth import (
 from .flush import FlushController
 from .feishu_client import FeishuAPIError, build_delivery_uuid
 from .lifecycle import (
+    CleanupState,
     cleanup_closed_controller,
     cleanup_orphan_message_lock,
     cleanup_runtime_state,
@@ -377,6 +377,26 @@ class RuntimeInteractionDeliveryReservation:
     reply_in_thread: bool
     predecessor_message_id: str
     delivery_key: str
+
+
+def _cleanup_state_for_app(app: web.Application) -> CleanupState:
+    """Adapt live registries without giving cleanup access to the application."""
+    return CleanupState(
+        sessions=app[SESSIONS_KEY],
+        aliases=app[SESSION_ALIASES_KEY],
+        message_locks=app[MESSAGE_LOCKS_KEY],
+        lock_users=app[MESSAGE_LOCK_USERS_KEY],
+        controllers=app[FLUSH_CONTROLLERS_KEY],
+        message_ids=app[FEISHU_MESSAGE_IDS_KEY],
+        bot_ids=app[MESSAGE_BOT_IDS_KEY],
+        card_configs=app[SESSION_CARD_CONFIGS_KEY],
+        summary_owners=app[CARD_SUMMARY_SESSION_KEYS_KEY],
+        summaries=app[CARD_SUMMARIES_KEY],
+        interaction_owners=app[INTERACTION_RESULT_SESSION_KEYS_KEY],
+        interaction_results=app[INTERACTION_RESULTS_KEY],
+        metrics=app[METRICS_KEY],
+        diagnostics=app[DIAGNOSTICS_KEY],
+    )
 
 
 class EventIdFence:
@@ -872,7 +892,7 @@ async def _runtime_cleanup_loop(app: web.Application) -> None:
         await _cleanup_sleep(RUNTIME_CLEANUP_INTERVAL_SECONDS)
         now = time.time()
         await _expire_pending_interactions(app, now=now)
-        cleanup_runtime_state(app, now)
+        cleanup_runtime_state(_cleanup_state_for_app(app), now)
 
 
 async def _cleanup_sleep(delay: float) -> None:
@@ -3660,11 +3680,11 @@ async def _events(request: web.Request) -> web.Response:
             lock_users[lock_key] = remaining_users
         else:
             lock_users.pop(lock_key, None)
-            cleanup_orphan_message_lock(request.app, lock_key, lock)
+            cleanup_orphan_message_lock(_cleanup_state_for_app(request.app), lock_key, lock)
     if post_lock_task is not None and _should_await_card_update(event):
         await post_lock_task
     if _event_is_terminal(event) and post_lock_task is None:
-        cleanup_runtime_state(request.app, time.time())
+        cleanup_runtime_state(_cleanup_state_for_app(request.app), time.time())
     return response
 
 
@@ -5891,8 +5911,8 @@ def _post_terminal_cleanup(
         return
     finally:
         now = time.time()
-        cleanup_closed_controller(app, session_key, controller, now=now)
-        cleanup_runtime_state(app, now)
+        cleanup_closed_controller(_cleanup_state_for_app(app), session_key, controller, now=now)
+        cleanup_runtime_state(_cleanup_state_for_app(app), now)
 
 
 def _ensure_card_animation(

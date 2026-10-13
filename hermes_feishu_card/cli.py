@@ -27,7 +27,6 @@ from hermes_feishu_card.install.file_transaction import (
     _restore_text_sha256,
     _read_restore_text,
     _assert_restore_evidence_set_unchanged,
-    _assert_restore_directory_ancestry_unchanged,
     _write_targets_portably,
 )
 

@@ -33,10 +33,7 @@ from .card_limits import serialize_card_for_delivery
 from .command_cards import (
     model_picker_options as _model_picker_options,
     model_picker_provider_tree as _model_picker_provider_tree,
-    model_picker_provider_options as _model_picker_provider_options,
-    model_picker_model_options as _model_picker_model_options,
     model_picker_provider as _model_picker_provider,
-    model_picker_current_provider_slug as _model_picker_current_provider_slug,
     hfc_native_model_picker_card as _hfc_native_model_picker_card,
     resume_picker_options as _resume_picker_options,
     parse_model_picker_choice as _parse_model_picker_choice,
