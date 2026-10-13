@@ -105,7 +105,7 @@ from .metrics import SidecarMetrics
 from .observations import timing_summary
 from .interaction_rules import (
     ApprovalWindowState, approval_window_can_reopen, RuntimeCallbackSnapshot,
-    callback_rejection, runtime_admission_has_expired,
+    callback_rejection, runtime_admission_has_expired, interaction_preflight_rejection,
     native_text_fallback_requested, runtime_text_decline_requested,
     runtime_admission_fingerprint as _runtime_admission_fingerprint,
 )
@@ -4665,26 +4665,22 @@ async def _apply_event_locked_inner(
         metrics.events_ignored += 1
         return web.json_response({"ok": True, "applied": False}), None
 
-    if event.event == "interaction.requested":
-        # Never claim a decision while showing only a card-limit placeholder.
-        # Preflight a copy before recording any pending state or sending a card.
-        preview = copy.deepcopy(session) if session is not None else CardSession(
-            conversation_id=event.conversation_id,
-            message_id=event.message_id,
-            chat_id=event.chat_id,
-            route_profile_id=_policy_profile_id(event) or "default",
-        )
-        if preview.apply(event, advance_sequence=advance_sequence):
-            preview_result = _render_session_card_result_for_app(
-                request.app, preview, session_key=session_key,
-            )
-            if preview_result.disposition != "card":
-                metrics.events_ignored += 1
-                return web.json_response({
-                    "ok": True,
-                    "applied": False,
-                    "reason": "interaction_card_limit",
-                }), None
+    # Reject before committing pending state or sending an unanswerable card.
+    preflight_rejection = interaction_preflight_rejection(
+        event,
+        session,
+        advance_sequence=advance_sequence,
+        render_disposition=lambda preview: _render_session_card_result_for_app(
+            request.app, preview, session_key=session_key,
+        ).disposition,
+    )
+    if preflight_rejection is not None:
+        metrics.events_ignored += 1
+        return web.json_response({
+            "ok": True,
+            "applied": False,
+            "reason": preflight_rejection,
+        }), None
 
     if event.event == "message.started":
         if session is not None:

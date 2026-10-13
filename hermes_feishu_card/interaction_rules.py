@@ -1,4 +1,4 @@
-"""Pure eligibility for reopening an expired approval review window.
+"""Interaction eligibility and isolated display preflight decisions.
 
 The HTTP boundary must first verify the original session/interaction, callback
 token and chat under its owner lock, then expire the interaction. A positive
@@ -7,14 +7,17 @@ result only permits showing a new window; it does not grant or restore consent.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 import hashlib
 import json
-from typing import Any, TYPE_CHECKING, cast, Mapping, Literal
+from typing import Any, TYPE_CHECKING, cast, Mapping, Literal, Callable
 
 from .events import SidecarEvent
+from .event_rules import policy_profile_id
+from .session import CardSession
 
 if TYPE_CHECKING:
-    from .session import CardSession, InteractionState
+    from .session import InteractionState
 
 
 APPROVAL_RUNTIME_HEARTBEAT_SECONDS = 15.0
@@ -151,3 +154,30 @@ def runtime_text_decline_requested(event: SidecarEvent) -> bool:
         and type(event.data) is dict
         and type(event.data.get("_hfc_runtime_admission")) is dict
     )
+
+
+def interaction_preflight_rejection(
+    event: SidecarEvent,
+    session: CardSession | None,
+    *,
+    advance_sequence: bool,
+    render_disposition: Callable[[CardSession], str],
+) -> Literal["interaction_card_limit"] | None:
+    """Preview eligibility without registering or mutating a display owner.
+
+    The injected renderer receives only the disposable preview. The coordinator
+    retains configuration lookup, rejection metrics and the real state commit.
+    Duplicate events do not render; application/render exceptions propagate.
+    """
+    if event.event != "interaction.requested":
+        return None
+    preview = deepcopy(session) if session is not None else CardSession(
+        conversation_id=event.conversation_id,
+        message_id=event.message_id,
+        chat_id=event.chat_id,
+        route_profile_id=policy_profile_id(event) or "default",
+    )
+    if preview.apply(event, advance_sequence=advance_sequence):
+        if render_disposition(preview) != "card":
+            return "interaction_card_limit"
+    return None
