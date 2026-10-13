@@ -14474,3 +14474,47 @@ async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
     await asyncio.sleep(0)
     remaining = [task for task in asyncio.all_tasks() - baseline_tasks if not task.done()]
     assert not remaining, [repr(task) for task in remaining]
+
+
+@pytest.mark.parametrize("runtime", [False, True])
+@pytest.mark.parametrize("sticky", [False, True])
+async def test_interaction_placement_matches_state_and_actual_send(client, runtime, sticky):
+    """Both transport paths must deliver to the same place their owner records."""
+    test_client, feishu_client = client
+    listener = RuntimeInteractionListener(TRANSPORT_ROOT_SECRET, lambda payload: True)
+    listener.start()
+    try:
+        started = await test_client.post("/events", json=event_payload(
+            "message.started", 0,
+            {"reply_to_message_id": "om_original", "reply_in_thread": sticky},
+            turn_id="turn-runtime", created_at=time.time(),
+        ))
+        assert started.status == 200
+        payload = runtime_interaction_payload(runtime_descriptor(listener))
+        if not runtime:
+            payload["data"].pop("_hfc_runtime_admission")
+        payload["thread_id"] = "omt_new_topic"
+        payload["data"].update(reply_to_message_id="om_event_anchor", reply_in_thread=False)
+        expected = ("omt_new_topic", "om_original" if sticky else "om_event_anchor", sticky)
+        original_send = feishu_client.send_card
+        observed = []
+
+        async def inspect_send(*args, **kwargs):
+            interaction = test_client.app[SESSIONS_KEY]["turn-runtime"].active_interaction
+            observed.append((
+                interaction.thread_id, interaction.reply_to_message_id,
+                interaction.reply_in_thread,
+                test_client.app[MESSAGE_LOCKS_KEY]["turn-runtime"].locked(),
+            ))
+            return await original_send(*args, **kwargs)
+
+        feishu_client.send_card = inspect_send
+        response = await test_client.post("/events", json=payload)
+        assert response.status == 200
+        assert observed == [(*expected, not runtime)]
+        assert (*feishu_client.sent[-1][2:], feishu_client.sent_reply_in_thread[-1]) == expected
+        interaction = test_client.app[SESSIONS_KEY]["turn-runtime"].active_interaction
+        assert (interaction.thread_id, interaction.reply_to_message_id, interaction.reply_in_thread) == expected
+        assert len(feishu_client.sent) == 2
+    finally:
+        listener.close()

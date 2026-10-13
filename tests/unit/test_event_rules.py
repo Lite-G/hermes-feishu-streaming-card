@@ -72,3 +72,33 @@ def test_alias_plan_is_a_new_mapping_and_does_not_mutate_session_views():
     sessions = MappingProxyType({"work:explicit": RouteView()})
     assert session_alias_assignments(value, "work:explicit", sessions=sessions) == {"work:om_new": "work:explicit", "work:om_reply": "work:explicit"}
     assert len(sessions) == 1
+
+
+@pytest.mark.parametrize("message_id,data,anchor,threaded,expected", [
+    ("om_new", {"reply_to_message_id": "om_event", "reply_in_thread": False}, "om_sticky", True, (None, "om_sticky", True)),
+    ("om_new", {"thread_id": "omt_topic", "reply_to_message_id": "om_event"}, "om_old", False, ("omt_topic", "om_event", False)),
+    ("om_new", {"reply_to_message_id": "om_event"}, "om_old", False, (None, "om_new", False)),
+    ("internal", {"reply_to_message_id": "om_event", "reply_in_thread": "true"}, "om_old", False, (None, "om_event", True)),
+    ("internal", {}, "om_fallback", False, (None, "om_fallback", False)),
+    ("internal", {"reply_to_message_id": "invalid", "thread_id": "invalid"}, "", False, (None, None, False)),
+    ("internal", {}, "", True, (None, None, True)),
+    ("internal", {"reply_to_message_id": "om_event"}, "legacy-anchor", True, (None, "om_event", True)),
+    # Keep the old final fallback, even when it is not an IM-shaped anchor.
+    ("internal", {}, "legacy-anchor", False, (None, "legacy-anchor", False)),
+])
+def test_interaction_reply_placement_precedence_and_input_immutability(
+    message_id, data, anchor, threaded, expected,
+):
+    import copy
+    from dataclasses import FrozenInstanceError
+    from hermes_feishu_card.event_rules import interaction_reply_placement
+
+    value = event("interaction.requested", message_id=message_id, data=data)
+    before = copy.deepcopy(value)
+    placement = interaction_reply_placement(
+        value, session_reply_to_message_id=anchor, session_reply_in_thread=threaded,
+    )
+    assert (placement.thread_id, placement.reply_to_message_id, placement.reply_in_thread) == expected
+    assert value == before
+    with pytest.raises(FrozenInstanceError):
+        placement.reply_in_thread = not threaded
