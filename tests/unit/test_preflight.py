@@ -407,3 +407,16 @@ def test_deleted_test_requires_a_replacement_matrix_instead_of_silent_omission(r
     code, report, _ = invoke(capsys, repo, ["--suite", "focused"])
     assert code == 2
     assert report["pytest"]["status"] == "not_run"
+
+
+def test_maintenance_evidence_change_selects_proof_and_cross_layer_stop_contracts():
+    targets, groups, unknown = preflight.select_targets(
+        ["hermes_feishu_card/maintenance_evidence.py"], []
+    )
+    assert not unknown
+    assert set(groups) == {"operations", "ownership"}
+    assert {
+        "tests/unit/test_maintenance_evidence.py",
+        "tests/unit/test_runtime_ownership.py",
+        "tests/integration/test_maintenance_runner.py",
+    } <= set(targets)
