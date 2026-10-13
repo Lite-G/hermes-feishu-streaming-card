@@ -4,6 +4,10 @@ import textwrap
 
 from . import stop_cancellation
 from .gateway_contracts import find_stale_interrupted_location
+from .cron_contracts import (
+    find_cron_deliver_body_location as _find_cron_deliver_body_location,
+    find_cron_media_delivery_location as _find_cron_media_delivery_location,
+)
 
 from .base_contracts import (
     find_base_patch_locations,
@@ -12,6 +16,8 @@ from .base_contracts import (
     _parse_exact_base_content,
 )
 from .ast_contracts import (
+    _body_location,
+    _is_docstring_expr,
     _leading_whitespace,
     _line_ending,
     _line_indent,
@@ -108,7 +114,6 @@ EXACT_BASE_FINAL_DELIVERY_PATCH_END = (
 )
 
 _HANDLER_NAME = "_handle_message_with_agent"
-_CRON_DELIVER_NAME = "_deliver_result"
 _NO_FINAL_NEWLINE = "# HERMES_FEISHU_CARD_NO_FINAL_NEWLINE"
 _SUPPORTED_STRATEGIES = {"legacy_gateway_run", "gateway_run_013_plus"}
 
@@ -1653,76 +1658,6 @@ def _branch_returns(body) -> bool:
     return False
 
 
-def _find_cron_deliver_body_location(tree, lines):
-    node = _find_cron_deliver_node(tree)
-    return _body_location(node, lines) if node is not None else None
-
-
-def _find_cron_media_delivery_location(tree, lines):
-    node = _find_cron_deliver_node(tree)
-    if node is None:
-        return None
-
-    extract_assignment = None
-    filter_assignment = None
-    for statement in node.body:
-        if not isinstance(statement, ast.Assign):
-            continue
-        if _assigns_media_and_cleaned_content(statement):
-            extract_assignment = statement
-        if _assigns_filtered_media_files(statement):
-            filter_assignment = statement
-    target = filter_assignment or extract_assignment
-    if target is None or target.lineno is None:
-        return None
-    end_lineno = getattr(target, "end_lineno", None) or target.lineno
-    return end_lineno, _line_indent(lines, target.lineno - 1)
-
-
-def _find_cron_deliver_node(tree):
-    for node in tree.body:
-        if _is_cron_deliver(node):
-            return node
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef):
-            for child in node.body:
-                if _is_cron_deliver(child):
-                    return child
-    return None
-
-
-def _assigns_media_and_cleaned_content(statement) -> bool:
-    names = {
-        element.id
-        for target in statement.targets
-        if isinstance(target, (ast.Tuple, ast.List))
-        for element in target.elts
-        if isinstance(element, ast.Name)
-    }
-    if not {"media_files", "cleaned_delivery_content"}.issubset(names):
-        return False
-    value = statement.value
-    return (
-        isinstance(value, ast.Call)
-        and isinstance(value.func, ast.Attribute)
-        and value.func.attr == "extract_media"
-    )
-
-
-def _assigns_filtered_media_files(statement) -> bool:
-    if not any(
-        isinstance(target, ast.Name) and target.id == "media_files"
-        for target in statement.targets
-    ):
-        return False
-    value = statement.value
-    return (
-        isinstance(value, ast.Call)
-        and isinstance(value.func, ast.Attribute)
-        and value.func.attr == "filter_media_delivery_paths"
-    )
-
-
 def _find_callback_body_location(
     tree,
     lines,
@@ -2018,54 +1953,8 @@ def _function_argument_names(node) -> set[str]:
     return {arg.arg for arg in args}
 
 
-def _body_location(node, lines):
-    if not node.body:
-        return None
-
-    if _is_docstring_expr(node.body[0]):
-        return _body_location_after_docstring(node, lines)
-
-    insert_before = node.body[0]
-    if _is_unsafe_one_line_body(node, insert_before):
-        return None
-    insert_at = insert_before.lineno - 1
-    return insert_at, _line_indent(lines, insert_at)
-
-
-def _body_location_after_docstring(node, lines):
-    if len(node.body) > 1:
-        insert_before = node.body[1]
-        if _is_unsafe_one_line_body(node, insert_before):
-            return None
-        insert_at = insert_before.lineno - 1
-        return insert_at, _line_indent(lines, insert_at)
-
-    docstring = node.body[0]
-    end_lineno = getattr(docstring, "end_lineno", docstring.lineno)
-    if end_lineno is None or docstring.lineno is None or docstring.lineno == node.lineno:
-        return None
-    insert_at = end_lineno
-    return insert_at, _line_indent(lines, docstring.lineno - 1)
-
-
-def _is_unsafe_one_line_body(handler, body_node) -> bool:
-    return body_node.lineno is None or body_node.lineno == handler.lineno
-
-
-def _is_docstring_expr(node) -> bool:
-    return (
-        isinstance(node, ast.Expr)
-        and isinstance(getattr(node, "value", None), ast.Constant)
-        and isinstance(node.value.value, str)
-    )
-
-
 def _is_handler(node) -> bool:
     return isinstance(node, ast.AsyncFunctionDef) and node.name == _HANDLER_NAME
-
-
-def _is_cron_deliver(node) -> bool:
-    return isinstance(node, ast.FunctionDef) and node.name == _CRON_DELIVER_NAME
 
 
 def _find_owned_block(content: str):

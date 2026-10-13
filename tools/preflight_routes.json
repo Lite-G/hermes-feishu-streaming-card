@@ -467,6 +467,10 @@
     "hermes_feishu_card/install/ast_contracts.py": [
       "install"
     ],
+    "hermes_feishu_card/install/cron_contracts.py": [
+      "install",
+      "upstream"
+    ],
     "hermes_feishu_card/install/gateway_contracts.py": [
       "install",
       "upstream"

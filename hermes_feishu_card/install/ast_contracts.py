@@ -434,3 +434,46 @@ def _is_split_compute_obligation_assignment(node: Any) -> bool:
         )
         and _same_expression(call.args[2], "text_content")
     )
+
+
+def _body_location(node: Any, lines: list[str]) -> tuple[int, str] | None:
+    if not node.body:
+        return None
+
+    if _is_docstring_expr(node.body[0]):
+        return _body_location_after_docstring(node, lines)
+
+    insert_before = node.body[0]
+    if _is_unsafe_one_line_body(node, insert_before):
+        return None
+    insert_at = insert_before.lineno - 1
+    return insert_at, _line_indent(lines, insert_at)
+
+
+def _body_location_after_docstring(node: Any, lines: list[str]) -> tuple[int, str] | None:
+    if len(node.body) > 1:
+        insert_before = node.body[1]
+        if _is_unsafe_one_line_body(node, insert_before):
+            return None
+        insert_at = insert_before.lineno - 1
+        return insert_at, _line_indent(lines, insert_at)
+
+    docstring = node.body[0]
+    end_lineno = getattr(docstring, "end_lineno", docstring.lineno)
+    if end_lineno is None or docstring.lineno is None or docstring.lineno == node.lineno:
+        return None
+    insert_at = end_lineno
+    return insert_at, _line_indent(lines, docstring.lineno - 1)
+
+
+def _is_unsafe_one_line_body(handler: Any, body_node: Any) -> bool:
+    return body_node.lineno is None or body_node.lineno == handler.lineno
+
+
+def _is_docstring_expr(node: Any) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(getattr(node, "value", None), ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
