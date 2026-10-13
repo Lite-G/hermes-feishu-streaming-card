@@ -9,7 +9,7 @@
 | native terminal admission、重复终态与持久 fence 衔接 | `native_admission` | 只依赖原始事件、owner 快照与四方法 store port；server 保留 policy、cache 提交、HTTP/指标与 repair 调度 |
 | 原 Hermes resolver 的单次认证 HTTP 请求 | `interaction_resolver` | server 在原锁内验证 owner、锁外请求、重新入锁校验对象/token/descriptor，再应用结果；指标与 HTTP 回执仍由 server 管理 |
 | 选择值与表单解析 | `interaction_input` | server/SDK 继续负责身份、过期、claim 和原 Hermes resolver |
-| 过期审批窗口的重展资格 | `interaction_rules` | server 先在原锁内验证对象/token/chat/kind 并 expire，再按资格旋转窗口 token；重展不执行 resolver |
+| 过期审批窗口资格、resolver 返回后的原 owner 校验 | `interaction_rules` | server 在原锁内捕获不可变请求快照，网络返回后重新加锁验证对象/token/chat/descriptor；expire 与状态提交仍在原 owner，重展不执行 resolver |
 | task 状态投影、颜色语义 | `card_view` | `presentation` 修改已知显示字段；不改执行或授权状态 |
 | 正文的完整来源与显示表示 | `content_plan`、`native_tables`、`text` | renderer 组合卡片并由共享 serializer 裁决最终容量 |
 | 命令卡纯构造 | `command_cards` | hook_runtime 保留 producer、callback 注册、adapter identity 与命令执行 |
@@ -51,3 +51,5 @@ native admission 的有 generation fence 与终态去重仍先于 policy；无 g
 已验证的恢复证据删除也由 `posix_transaction` 持有目录句柄：CLI 只选择有序路径、保留原无 identity 的 legacy 分支。执行器先绑定并核验全部目标，再逐项删除，finally 关闭所有句柄；不把多文件删除称为原子事务。旧 `_safe_unlink_restore_evidence` 无外部消费者，随实现迁入实际所有者，不新增 CLI 转发别名。
 
 交互 resolver 只返回受限结果，不接收 app/session、不重试、不更新授权。取消原样传播，由 server 记录取消指标；网络成功仍须通过原身份复核，不可据此直接写入新一轮交互。
+
+resolver 按原 2 秒预算读取完整响应，最多缓存 513 字节；未到 EOF 的合法 JSON 前缀不作为成功回执。失败统计由调用方每次请求记录一次，连接清理异常不会重复计数。

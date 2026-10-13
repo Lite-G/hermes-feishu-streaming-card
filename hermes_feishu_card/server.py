@@ -102,7 +102,10 @@ from .lifecycle import (
 )
 from .metrics import SidecarMetrics
 from .observations import timing_summary
-from .interaction_rules import ApprovalWindowState, approval_window_can_reopen
+from .interaction_rules import (
+    ApprovalWindowState, approval_window_can_reopen, RuntimeCallbackSnapshot,
+    runtime_admission_fingerprint as _runtime_admission_fingerprint,
+)
 from .interaction_resolver import resolve_interaction
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
@@ -1151,20 +1154,6 @@ async def _authenticate_sensitive_request(
     return None
 
 
-def _runtime_admission_fingerprint(descriptor: dict[str, Any]) -> str:
-    try:
-        body = json.dumps(
-            descriptor,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError):
-        return ""
-    return hashlib.sha256(b"hfc-sidecar-runtime-admission-v1\0" + body).hexdigest()
-
-
 async def _resolve_runtime_interaction_callback(
     app: web.Application,
     descriptor: dict[str, Any],
@@ -1286,7 +1275,7 @@ async def _interaction_action(
     expired_card: dict[str, Any] | None = None
     expired_interaction = None
     expiry_sequence = -1
-    runtime_callback: dict[str, Any] | None = None
+    runtime_callback: RuntimeCallbackSnapshot | None = None
     callback_card: dict[str, Any] | None = None
     async with lock:
         current_session = request.app[SESSIONS_KEY].get(session_key)
@@ -1344,19 +1333,17 @@ async def _interaction_action(
                     status=404,
                 )
             descriptor = dict(current_interaction.runtime_admission)
-            runtime_callback = {
-                "session_key": session_key,
-                "session": current_session,
-                "interaction": current_interaction,
-                "interaction_id": interaction_id,
-                "callback_token": token,
-                "chat_id": callback_chat_id,
-                "profile_id": expected_profile_id,
-                "fingerprint": _runtime_admission_fingerprint(descriptor),
-                "descriptor": descriptor,
-                "choice": choice,
-                "turn_id": current_interaction.runtime_turn_id,
-            }
+            runtime_callback = RuntimeCallbackSnapshot(
+                session=current_session,
+                interaction=current_interaction,
+                interaction_id=interaction_id,
+                callback_token=token,
+                chat_id=callback_chat_id,
+                fingerprint=_runtime_admission_fingerprint(descriptor),
+                descriptor=descriptor,
+                choice=choice,
+                turn_id=current_interaction.runtime_turn_id,
+            )
             response = None
             post_lock_task = None
         else:
@@ -1380,8 +1367,8 @@ async def _interaction_action(
         try:
             resolved = await _resolve_runtime_interaction_callback(
                 request.app,
-                runtime_callback["descriptor"],
-                runtime_callback["choice"],
+                runtime_callback.descriptor,
+                runtime_callback.choice,
             )
         except asyncio.CancelledError:
             raise
@@ -1390,10 +1377,10 @@ async def _interaction_action(
                 current_session = request.app[SESSIONS_KEY].get(session_key)
                 current_interaction = (
                     current_session.active_interaction
-                    if current_session is runtime_callback["session"]
+                    if current_session is runtime_callback.session
                     else None
                 )
-                if current_interaction is runtime_callback["interaction"]:
+                if current_interaction is runtime_callback.interaction:
                     _expire_runtime_admission_locked(
                         request.app,
                         session_key,
@@ -1413,24 +1400,11 @@ async def _interaction_action(
             current_session = request.app[SESSIONS_KEY].get(session_key)
             current_interaction = (
                 current_session.active_interaction
-                if current_session is runtime_callback["session"]
+                if current_session is runtime_callback.session
                 else None
             )
-            changed = bool(
-                current_interaction is not runtime_callback["interaction"]
-                or current_interaction is None
-                or current_interaction.interaction_id != interaction_id
-                or current_interaction.callback_token != token
-                or current_session.chat_id != callback_chat_id
-                or current_interaction.status != "pending"
-                or current_interaction.runtime_admission is None
-                or _runtime_admission_fingerprint(
-                    dict(current_interaction.runtime_admission)
-                )
-                != runtime_callback["fingerprint"]
-            )
-            if changed:
-                runtime_callback["interaction"].runtime_admission = None
+            if not runtime_callback.is_current(current_session):
+                runtime_callback.interaction.runtime_admission = None
                 return web.json_response(
                     {"ok": False, "error": "interaction changed"}, status=409
                 )
@@ -1446,7 +1420,7 @@ async def _interaction_action(
                 )
             event = replace(
                 event,
-                turn_id=runtime_callback["turn_id"],
+                turn_id=runtime_callback.turn_id,
                 sequence=current_session.last_sequence + 1,
                 created_at=time.time(),
             )
