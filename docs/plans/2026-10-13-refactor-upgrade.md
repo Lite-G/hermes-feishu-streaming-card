@@ -326,3 +326,5 @@ T05 的 `ec3d557` 提取交互容量预检，保留 copy/new → apply → rende
 T05 交互预检的独立验收已完成：22 项定向测试（15 个新增规则、7 个 HTTP）及 docs/metadata102项通过，针对性 Ruff/mypy 和三种新进程导入顺序通过。首次失败来自测试误用 deepcopy 对象等值，修正为完整存储内容对比后通过，产品代码未为此变更；真实 Python3.9运行、普通包及客户端尚未覆盖此切口。Draft #405 保留该范围。
 
 T14 的 `904d314` 将维护排空健康校验和连续心跳证明迁入 `maintenance_evidence`。轮询、deadline、lease、锁和实际停服保留原编排；聚合 owner 数据仍归 `runtime_ownership`。本次保留原字段校验、30秒新鲜度、同owner递增和无效/忙碌重置语义，独立验收进行中；未实现多Gateway协同维护，也未改生产。
+
+T05 的 `da3d18b` 把同一阶段的 owner 刷新规则迁入 `owner_display_policy`：pending/paused 普通更新冻结输入，独立回执避免覆盖前一卡，同消息保留 callback/text 方言。采用两阶段判断以保留 failed 回执先 render、之后惰性查询 mode 的顺序；没有把不同阶段的 continuation 创建、重渲染、native ledger 事务合成提前计算的计划。独立测试待执行，完整 T05 尚未结项。

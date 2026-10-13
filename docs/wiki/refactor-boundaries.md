@@ -23,6 +23,7 @@
 | Base delivery 源码家族验证 | `install/base_contracts`、`install/ast_contracts` | patcher 传入原 renderer 生成的 owned blocks，再按原事务应用 |
 | portable 安装文件事务与 evidence | `install/file_transaction` | CLI 与 decomposed installer 共用；自动恢复仍要求原有更强目录绑定 |
 | POSIX 目录句柄、原子写入、事务回滚及已验证证据删除 | `install/posix_transaction` | CLI 选择安装/恢复计划并传入原有 pre-commit/validate callbacks；底层模块不导入 CLI |
+| 当前卡片替换资格、输入冻结与回执方言选择 | `owner_display_policy` | 原 owner/generation 先核验；failed 回执先渲染再选来源；模式按原分支惰性查询；实际 PATCH 和提交留 server |
 | 维护排空证据与连续空闲心跳 | `maintenance_evidence` | 原维护编排保留轮询、时间、锁、lease 与停服；每 sender 数据仍由 runtime_ownership 管理 |
 | 受理事件观测耗时 | `observations` | session 只记录已接受事件；checkpoint 不恢复计时；不推导模型速率 |
 
