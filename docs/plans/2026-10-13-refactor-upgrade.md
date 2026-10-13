@@ -330,3 +330,5 @@ T05 交互预检的独立验收已完成：22 项定向测试（15 个新增规�
 T14 的 `904d314` 将维护排空健康校验和连续心跳证明迁入 `maintenance_evidence`。轮询、deadline、lease、锁和实际停服保留原编排；聚合 owner 数据仍归 `runtime_ownership`。本次保留原字段校验、30秒新鲜度、同owner递增和无效/忙碌重置语义。独立 operations/ownership/docs/preflight524项及追加route32项通过（有重叠，不累计），Ruff/mypy23模块通过；真实supervisor→wait→run_job命令harness证明忙碌、过期/不完整observer和Gateway冲突均不执行mutation。Draft #406；普通包和full CI另验，未实现多Gateway协同维护，也未改生产。
 
 T05 的 `da3d18b` 把同一阶段的 owner 刷新规则迁入 `owner_display_policy`：pending/paused 普通更新冻结输入，独立回执避免覆盖前一卡，同消息保留 callback/text 方言。采用两阶段判断以保留 failed 回执先 render、之后惰性查询 mode 的顺序；没有把不同阶段的 continuation 创建、重渲染、native ledger 事务合成提前计算的计划。独立测试待执行，完整 T05 尚未结项。
+
+T05/T18 的 `da89d6d` 移除 lifecycle 四处对 server 的反向导入，使用借用实时 registry 的 `CleanupState`；server 保留 AppKey 适配，清理所有者保留原身份栅栏、顺序、指标和有界历史。同时删除五个无仓库内消费者的私有导入别名，保留实现及已声明兼容入口。本批正在独立并发/HTTP验收；recovery/integrity 的共享 I/O 和后续完整职责包仍未关闭。
