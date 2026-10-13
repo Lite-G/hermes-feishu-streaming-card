@@ -332,3 +332,5 @@ T14 的 `904d314` 将维护排空健康校验和连续心跳证明迁入 `mainte
 T05 的 `da3d18b` 把同一阶段的 owner 刷新规则迁入 `owner_display_policy`：pending/paused 普通更新冻结输入，独立回执避免覆盖前一卡，同消息保留 callback/text 方言。采用两阶段判断以保留 failed 回执先 render、之后惰性查询 mode 的顺序；没有把不同阶段的 continuation 创建、重渲染、native ledger 事务合成提前计算的计划。独立 93 个不同运行场景均有通过证据（首轮90过、3项新测试设置错误，修正后仅重跑受影响5项），Ruff/mypy24、docs102和路由4项通过；完整 T05 尚未结项。
 
 T05/T18 的 `da89d6d` 移除 lifecycle 四处对 server 的反向导入，使用借用实时 registry 的 `CleanupState`；server 保留 AppKey 适配，清理所有者保留原身份栅栏、顺序、指标和有界历史。同时删除五个无仓库内消费者的私有导入别名，保留实现及已声明兼容入口。本批独立组合回归2263 passed / 1 skipped，Ruff/mypy25通过；纯规则、真实HTTP、cleanup/flush及命令入口覆盖均留证。普通包与full CI另验；recovery/integrity 的共享 I/O 和后续完整职责包仍未关闭。
+
+T11 的 `63bcc49` 实现首个完整可选续答导航：IM成功回执中的message_app_link通过品牌/目标/定位校验后随投递结果传递，新owner确认后旧schema2卡追加“查看续答”。无有效链接或预算不足时保留原文字/正文，不新增请求、配置或授权。未从position猜测链接，独立自动化、普通包与真实客户端点击待验；历史五卡API读回不代签本功能。

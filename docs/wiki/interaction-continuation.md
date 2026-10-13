@@ -49,3 +49,11 @@ V4.6.4 已发布，使 clarify 和 approval 之后的结果按聊天创建时间
 ## V4.6.6 审批重复精简
 
 整轮 completed/failed 后，sidecar 显式 PATCH 独立完整审批回执，确认问题、操作范围、选项和决定仍在平台后，才从正文或旧段卡移除重复审阅/选择块。指纹绑定会话路由、问题与决定；唯一 owner、pending/paused/failed 交互、容量不足、PATCH 失败或会话已被替换时保留。连续审批最多登记 32 个旧段，仅保存展示副本，不保存 callback token 或 admission；不写入检查点，不恢复执行。clarify 不在此精简范围。可选清理失败不阻断最终答案。
+
+## 开发候选：查看续答
+
+新续答明确送达后，旧 schema-2 卡可以提供“查看续答”按钮。链接只来自该次 IM create/reply 返回的 `message_app_link`，并核对消息、聊天、官方品牌域名与定位参数；CardKit 使用最终 IM 消息回执，不能使用卡片容器 ID。没有有效链接、话题定位不完整或链接格式未知时，保留原文字提示，不新增历史查询或权限。
+
+按钮只打开已确认的消息，不重新执行任务或批准操作。仅按钮使整卡超限时省略按钮，原文与审批范围不裁剪；旧卡更新失败不回滚新 owner。后续审批重复精简保留导航，不为导航增加检查点字段或恢复旧授权。
+
+来源：[官方发送回执模型](https://github.com/larksuite/oapi-sdk-python/blob/e321c555061b60cfbb3a3166b22c8ebc8a45fa82/lark_oapi/api/im/v1/model/create_message_response_body.py)、[官方消息 AppLink 实现](https://github.com/larksuite/cli/blob/1d26c2283915a4f8e7d03a880ed0e4fae91309a8/shortcuts/im/convert_lib/content_convert.go#L267)、[JSON 2.0 按钮](https://open.larkenterprise.com/document/feishu-cards/card-json-v2-components/interactive-components/button)。本候选不照搬位置拼接 fallback，只接受平台返回的有效链接。自动化与桌面/移动端真实点击仍分别验收，尚未发布。
