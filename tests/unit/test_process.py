@@ -2779,3 +2779,108 @@ def test_numeric_pid_termination_is_disabled_on_all_platforms(monkeypatch):
 
     with pytest.raises(RuntimeError, match="disabled"):
         process.stop_pid(5678)
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+@pytest.mark.parametrize("pidfile_state", ["permission_denied", "dangling_symlink", "missing"])
+def test_pidfile_inspection_gate_with_modern_path_semantics(
+    monkeypatch, tmp_path, operation, pidfile_state,
+):
+    state_root = tmp_path / "private-state"
+    state_root.mkdir(mode=0o700)
+    record_path = state_root / process.PIDFILE_NAME
+    if pidfile_state == "permission_denied":
+        record_path.write_text("unreadable existing ownership evidence", encoding="utf-8")
+    elif pidfile_state == "dangling_symlink":
+        record_path.symlink_to(state_root / "missing-target")
+    monkeypatch.setattr(process, "state_dir", lambda: state_root)
+    monkeypatch.setattr(process, "fetch_health", lambda _config: None)
+    # The Windows branch skips legacy POSIX pidfile migration. Removing the
+    # uid API reaches the same branch without changing os.name globally.
+    monkeypatch.setattr(process.os, "getuid", None, raising=False)
+    effects = []
+    metadata_errors = []
+    read_errors = []
+    original_open = process.os.open
+    original_stat = process.os.stat
+    original_lstat = process.os.lstat
+    original_exists = process.Path.exists
+    original_is_symlink = process.Path.is_symlink
+
+    def is_denied(path):
+        return pidfile_state == "permission_denied" and process.Path(path) == record_path
+
+    def denied_open(path, *args, **kwargs):
+        if is_denied(path):
+            read_errors.append("open")
+            raise PermissionError("synthetic pidfile read denied")
+        return original_open(path, *args, **kwargs)
+
+    def denied_stat(path, *args, **kwargs):
+        if is_denied(path):
+            metadata_errors.append("stat")
+            raise PermissionError("synthetic pidfile attributes denied")
+        return original_stat(path, *args, **kwargs)
+
+    def denied_lstat(path, *args, **kwargs):
+        if is_denied(path):
+            metadata_errors.append("lstat")
+            raise PermissionError("synthetic pidfile attributes denied")
+        return original_lstat(path, *args, **kwargs)
+
+    def exists_like_python314(path):
+        try:
+            return original_exists(path)
+        except OSError:
+            return False
+
+    def is_symlink_like_python314(path):
+        try:
+            return original_is_symlink(path)
+        except OSError:
+            return False
+
+    monkeypatch.setattr(process.os, "open", denied_open)
+    monkeypatch.setattr(process.os, "stat", denied_stat)
+    monkeypatch.setattr(process.os, "lstat", denied_lstat)
+    monkeypatch.setattr(process.Path, "exists", exists_like_python314)
+    monkeypatch.setattr(process.Path, "is_symlink", is_symlink_like_python314)
+
+    def forbidden(name):
+        def action(*_args, **_kwargs):
+            effects.append(name)
+            pytest.fail(f"unverified pidfile must not allow {name}")
+        return action
+
+    def token_boundary(_token):
+        if pidfile_state == "missing":
+            effects.append("missing-file-start-admitted")
+            raise ValueError("stop test before real credential write")
+        return forbidden("token write")()
+
+    monkeypatch.setattr(process, "write_control_token_file", token_boundary)
+    monkeypatch.setattr(process, "write_pid_record", forbidden("pidfile write"))
+    monkeypatch.setattr(process.subprocess, "Popen", forbidden("Popen"))
+    monkeypatch.setattr(process, "clear_pid", forbidden("clear_pid"))
+    monkeypatch.setattr(process, "stop_pid", forbidden("stop_pid"))
+    monkeypatch.setattr(process.os, "kill", forbidden("kill"))
+    config = {"service": {"manager": "detached"}, "server": {"host": "127.0.0.1", "port": 0}}
+    if operation == "start":
+        result = process.start_sidecar(tmp_path / "config.yaml", config)
+    else:
+        result = process.stop_sidecar(config)
+
+    if pidfile_state == "permission_denied":
+        assert read_errors and metadata_errors
+        assert result == f"failed: pidfile state could not be inspected; {operation} refused"
+        assert effects == []
+    elif pidfile_state == "dangling_symlink":
+        assert result == f"failed: invalid pidfile exists; {operation} refused"
+        assert effects == []
+        assert original_is_symlink(record_path)
+    elif operation == "start":
+        assert result == "failed: private control token file could not be prepared"
+        assert effects == ["missing-file-start-admitted"]
+    else:
+        assert result == "not running"
+        assert effects == []
