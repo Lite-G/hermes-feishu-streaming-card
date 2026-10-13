@@ -133,7 +133,7 @@ def runtime_admission_has_expired(interaction: InteractionState, *, now: float) 
     if interaction.status != "pending" or interaction.runtime_admission is None:
         return False
     descriptor = dict(cast(Mapping[str, Any], interaction.runtime_admission))
-    expires_at = descriptor.get("expires_at")
+    expires_at = cast(float, descriptor.get("expires_at"))
     descriptor_expired = bool(type(expires_at) in (int, float) and now >= expires_at)
     return descriptor_expired or interaction.is_expired(now)
 
