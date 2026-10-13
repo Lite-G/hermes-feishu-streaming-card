@@ -134,7 +134,7 @@ def start_sidecar(
     record = read_pid_record()
     record_path = pid_path()
     try:
-        record_file_exists = record_path.exists() or record_path.is_symlink()
+        record_file_exists = _pidfile_entry_exists(record_path)
     except OSError:
         return "failed: pidfile state could not be inspected; start refused"
     if record is not None and not _record_identity_valid(record):
@@ -320,7 +320,7 @@ def stop_sidecar(config: dict[str, dict[str, Any]]) -> str:
     record = read_pid_record()
     if record is None:
         try:
-            record_file_exists = pid_path().exists() or pid_path().is_symlink()
+            record_file_exists = _pidfile_entry_exists(pid_path())
         except OSError:
             return "failed: pidfile state could not be inspected; stop refused"
         if record_file_exists:
@@ -585,6 +585,20 @@ def _open_health_url(url: str, timeout: float):
 def read_pid() -> int | None:
     record = read_pid_record()
     return record["pid"] if record is not None else None
+
+
+def _pidfile_entry_exists(path: Path) -> bool:
+    """Only an absent directory entry is missing; inspection errors propagate.
+
+    Path.exists/is_symlink suppress OSError on modern Python, which cannot
+    distinguish an unreadable ownership record from a safely absent record.
+    lstat also preserves the refusal for dangling symlinks.
+    """
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def read_pid_record() -> dict[str, Any] | None:
