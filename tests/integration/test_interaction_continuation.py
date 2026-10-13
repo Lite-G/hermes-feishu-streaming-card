@@ -531,3 +531,77 @@ async def test_resolved_receipts_keep_dialect_choices_and_live_turn(start_first,
             assert app[SESSIONS_KEY]['turn_fixture'].status not in {'completed','failed'}
         await post(http, 'message.completed', 6, {'answer':'FINAL_AFTER_TWO'})
         assert 'FINAL_AFTER_TWO' in str(client.updated[-1][1])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['callback', 'text'])
+@pytest.mark.parametrize('legacy_owner', [False, True])
+async def test_failed_receipt_render_is_read_only_before_owner_policy_selection(monkeypatch, mode, legacy_owner):
+    """A pre-render snapshot is valid only while the real renderer preserves it."""
+    from hermes_feishu_card import server as sidecar
+    from hermes_feishu_card.owner_display_policy import OwnerRefreshState
+    client = Client()
+    app = create_app(client, card_config={'flush_interval_ms': 0, 'interaction_mode': mode})
+    trace = []
+    original_render = sidecar._render_session_card_for_app
+    original_source = OwnerRefreshState.card_source
+
+    def stored_state(session):
+        return copy.deepcopy({
+            key: vars(value) if key in {'thinking_normalizer', 'answer_normalizer'} else value
+            for key, value in vars(session).items()
+        })
+
+    def render(app, session, **kwargs):
+        before = stored_state(session)
+        interaction = session.active_interaction
+        tracked = interaction is not None and interaction.status == 'failed' and bool(interaction.receipt_fingerprint)
+        card = original_render(app, session, **kwargs)
+        if tracked:
+            assert stored_state(session) == before, 'failed receipt render changed the accepted owner'
+            trace.append('failed-render')
+        return card
+
+    def select(snapshot, supplier):
+        if snapshot.refresh_failed_receipt_first:
+            assert trace and trace[-1] == 'failed-render'
+            owner = app[SESSIONS_KEY]['turn_fixture']
+            interaction = owner.active_interaction
+            assert snapshot.owner_message_id == app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture']
+            assert snapshot.interaction_status == interaction.status
+            assert snapshot.interaction_message_id == interaction.feishu_message_id
+            assert snapshot.has_legacy_owner_receipt == bool(owner.legacy_owner_receipt)
+            assert snapshot.has_receipt_fingerprint == bool(interaction.receipt_fingerprint)
+            trace.append('policy-selection')
+        return original_source(snapshot, supplier)
+
+    monkeypatch.setattr(sidecar, '_render_session_card_for_app', render)
+    monkeypatch.setattr(OwnerRefreshState, 'card_source', select)
+    async with TestClient(TestServer(app)) as http:
+        if legacy_owner:
+            await interact(http, 1, 'first-owner')
+            sequence = 3
+        else:
+            await post(http, 'message.started', 0)
+            sequence = 1
+        await post(http, 'interaction.requested', sequence, {
+            'interaction_id': 'failed-receipt', 'kind': 'clarify', 'prompt': 'Choose fixture',
+            'options': [{'label': 'Continue', 'value': 'once'}],
+            'reply_to_message_id': 'om_fixture_anchor', 'reply_in_thread': True,
+        })
+        owner = app[SESSIONS_KEY]['turn_fixture']
+        original_owner_id = app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture']
+        receipt_id = owner.active_interaction.feishu_message_id
+        assert receipt_id != original_owner_id
+        await post(http, 'interaction.failed', sequence + 1, {
+            'interaction_id': 'failed-receipt', 'error': 'synthetic failure',
+        })
+        for _ in range(100):
+            if 'policy-selection' in trace:
+                break
+            await asyncio.sleep(.01)
+        assert 'policy-selection' in trace
+        assert app[SESSIONS_KEY]['turn_fixture'] is owner
+        assert app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture'] == original_owner_id
+        assert owner.active_interaction.status == 'failed' and owner.active_interaction.receipt_fingerprint
+        assert not client.cross_dialect

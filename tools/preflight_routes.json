@@ -97,6 +97,7 @@
       "tests/integration/test_card_freeze.py",
       "tests/unit/test_paused_approval_delivery.py",
       "tests/unit/test_interaction_rules.py",
+      "tests/unit/test_owner_display_policy.py",
       "tests/unit/test_interaction_preflight.py",
       "tests/unit/test_interaction_resolver.py",
       "tests/unit/test_interaction_receipts.py"
