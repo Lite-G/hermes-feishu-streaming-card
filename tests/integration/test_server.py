@@ -14282,3 +14282,172 @@ async def test_health_responds_while_integrity_source_scan_is_blocked():
             await check
         body = await (await client.get("/health")).json()
         assert body["integrity"]["last_reason"] == "recovery_not_required"
+
+
+@pytest.mark.parametrize("session_count", [1, 5, 20])
+@pytest.mark.parametrize("round_number", [1, 2, 3])
+async def test_slow_loopback_downstream_keeps_terminal_and_interaction_live(
+    tmp_path, monkeypatch, session_count, round_number, record_property,
+):
+    """Exercise real HTTP on both sides while each session's PATCH is blocked.
+
+    For N streaming sessions, N isolated pending-choice probes run alongside.
+    ACKs and interaction results must arrive before downstream is released;
+    after release, each message must end with its own authoritative answer.
+    Three independent rounds also check cleanup of actual asyncio workers.
+    """
+    from aiohttp import ClientSession, web
+
+    release = asyncio.Event()
+    release.set()
+    entered = set()
+    deliveries = []
+    active_updates = 0
+    peak_updates = 0
+    prefix = f"load-{round_number}-"
+
+    async def update_endpoint(request):
+        nonlocal active_updates, peak_updates
+        payload = await request.json()
+        entered.add(payload["message_id"])
+        active_updates += 1
+        peak_updates = max(peak_updates, active_updates)
+        try:
+            await release.wait()
+            await asyncio.sleep(0.01)
+            deliveries.append(payload)
+            return web.json_response({"ok": True})
+        finally:
+            active_updates -= 1
+
+    downstream = web.Application()
+    downstream.router.add_post("/update", update_endpoint)
+    downstream_server = TestServer(downstream)
+    await downstream_server.start_server()
+    try:
+        baseline_tasks = set(asyncio.all_tasks())
+        background = []
+        monkeypatch.setattr(sidecar_server, "UPDATE_MIN_INTERVAL_SECONDS", 0)
+
+        async with ClientSession() as transport:
+            class SlowHTTPClient(FakeFeishuClient):
+                async def update_card_message(self, message_id, card):
+                    async with transport.post(
+                        downstream_server.make_url("/update"),
+                        json={"message_id": message_id, "card": card},
+                    ) as response:
+                        assert response.status == 200
+                        await response.json()
+                    self.updated.append((message_id, card))
+
+            feishu = SlowHTTPClient()
+            app = create_app(
+                feishu,
+                native_handoff_store=NativeHandoffStore(tmp_path / "handoffs"),
+                card_config={"flush_interval_ms": 0, "final_drain_timeout_ms": 20},
+            )
+            client = TestClient(TestServer(app))
+            await client.start_server()
+
+            def payload(index, event, sequence, data=None):
+                return event_payload(
+                    event, sequence, data,
+                    conversation_id=f"{prefix}conversation-{index}",
+                    message_id=f"{prefix}message-{index}",
+                    chat_id=f"oc_load_{index}",
+                )
+
+            async def post(index, event, sequence, data=None):
+                response = await asyncio.wait_for(
+                    client.post("/events", json=payload(index, event, sequence, data)), 5
+                )
+                body = await response.json()
+                assert response.status == 200, body
+                return body
+
+            try:
+                await asyncio.gather(*(post(i, "message.started", 0) for i in range(2 * session_count)))
+                # Create genuine pending choices before saturating display updates.
+                await asyncio.gather(*(post(i + session_count, "interaction.requested", 1, {
+                    "interaction_id": f"{prefix}choice-{i}", "kind": "clarify",
+                    "prompt": f"Choose {i}", "options": [{"label": "A", "value": "a"}],
+                }) for i in range(session_count)))
+                choices = {}
+                for chat, card, _, _ in feishu.sent:
+                    buttons = interaction_buttons(card)
+                    if buttons:
+                        choices[chat] = buttons[0]["value"]
+                assert len(choices) == session_count
+                release.clear()
+                entered.clear()
+                deliveries.clear()
+                await asyncio.gather(*(post(i, "answer.delta", 2, {"text": "begin "}) for i in range(session_count)))
+                deadline = asyncio.get_running_loop().time() + 3
+                while len(entered) < session_count and asyncio.get_running_loop().time() < deadline:
+                    await asyncio.sleep(0.005)
+                assert len(entered) >= session_count
+                # Long stream frames contend with blocked outgoing HTTP, not sleep mocks.
+                await asyncio.wait_for(asyncio.gather(*(
+                    post(i, "answer.delta", seq, {"text": f"frame-{seq} " + "x" * 256})
+                    for seq in range(3, 27) for i in range(session_count)
+                )), 10)
+                started = asyncio.get_running_loop().time()
+                async def choose(i):
+                    response = await client.post("/card/actions", json={"event": {
+                        "context": {"open_chat_id": f"oc_load_{i + session_count}"},
+                        "operator": {"open_id": "ou_user"},
+                        "action": {"value": choices[f"oc_load_{i + session_count}"]},
+                    }})
+                    assert response.status == 200
+                    await response.json()
+                    result = await client.get(f"/interactions/{prefix}choice-{i}")
+                    assert (await result.json())["choice"] == "a"
+                await asyncio.wait_for(asyncio.gather(*(choose(i) for i in range(session_count))), 5)
+                choice_elapsed = asyncio.get_running_loop().time() - started
+                started = asyncio.get_running_loop().time()
+                terminal = await asyncio.wait_for(asyncio.gather(*(
+                    post(i, "message.completed", 27, {"answer": f"FINAL_{prefix}{i}_END"})
+                    for i in range(session_count)
+                )), 5)
+                ack_elapsed = asyncio.get_running_loop().time() - started
+                assert all(item.get("applied") is True for item in terminal)
+                assert not release.is_set() and deliveries == []
+                controllers = list(app[FLUSH_CONTROLLERS_KEY].values())
+                background = [controller._task for controller in controllers if controller._task]
+                # One coalescing display task per controller, not one task per frame.
+                assert len(background) <= 3 * session_count
+                assert len(set(background)) == len(background)
+                release.set()
+                deadline = asyncio.get_running_loop().time() + 5
+                while asyncio.get_running_loop().time() < deadline:
+                    if all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count)):
+                        break
+                    await asyncio.sleep(0.01)
+                assert all(f"FINAL_{prefix}{i}_END" in str(deliveries) for i in range(session_count))
+                for i in range(session_count):
+                    own = [message for message, card in feishu.updated if f"FINAL_{prefix}{i}_END" in str(card)]
+                    assert own
+                    for message in own:
+                        last = [card for mid, card in feishu.updated if mid == message][-1]
+                        assert f"FINAL_{prefix}{i}_END" in str(last)
+                        assert sum(f"FINAL_{prefix}{j}_END" in str(last) for j in range(session_count)) == 1
+                assert len(deliveries) < session_count * 24
+                record_property("stream_sessions", session_count)
+                record_property("interaction_probe_sessions", session_count)
+                record_property("choice_ack_seconds", choice_elapsed)
+                record_property("terminal_ack_seconds", ack_elapsed)
+                record_property("downstream_requests", len(deliveries))
+                record_property("peak_active_downstream", peak_updates)
+                record_property("display_tasks_at_terminal", len(background))
+            finally:
+                release.set()
+                background = [controller._task for controller in app[FLUSH_CONTROLLERS_KEY].values()
+                              if controller._task and not controller._task.done()]
+                if background:
+                    await asyncio.wait_for(asyncio.gather(*background, return_exceptions=True), 5)
+                await client.close()
+    finally:
+        await downstream_server.close()
+    await asyncio.sleep(0)
+    remaining = [task for task in asyncio.all_tasks() - baseline_tasks if not task.done()]
+    assert not remaining, [repr(task) for task in remaining]
