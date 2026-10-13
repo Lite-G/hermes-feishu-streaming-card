@@ -51,7 +51,7 @@ POSIX writer、bound helpers 和 capability 检查的产品消费者已全部改
 
 ## 仍需继续整理
 
-server 的交互 claim/回执、handoff repair 编排和部分状态提交仍在协调器；hook producer/SDK 接线、CLI 的完整生命周期事务以及 Gateway/cron 来源家族尚未完成全部拆分。移动端真机、五人上手试用、性能比较与公开包验收分别留在计划中，不用本页的结构说明代替。
+server 保留原锁内的交互校验、送达后身份复核及状态提交，理由和验收映射见[交互协议](interaction-protocol.md)。这些协调步骤不因仍位于 server 就需要另建服务。hook producer/SDK 接线、CLI 生命周期与 Gateway/cron 来源家族按实际职责和来源证明继续审查；不以拆完所有函数作为目标。移动端真机、五人上手试用和完整候选验收仍分别留在计划中，本页结构说明不能替代它们。
 
 native admission 的有 generation fence 与终态去重仍先于 policy；无 generation 的 legacy lifecycle 准备仍在 policy 之后。返回值分开保存 restore 时的 cache 更新和 expire 后的 selected record，后续拒绝也不能丢弃已发生的 cache 更新。四次 store 操作沿用各自的原子机制，不被描述为一个新的跨调用事务。
 
@@ -80,3 +80,9 @@ Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序�
 本职责包的产品实现需独立验证 Recovery、Integrity 和真实 CLI 三个原入口；既有 CLI writer 绿色证据不能代替另两入口。源码、普通 wheel 和平台验收仍各自登记，不由本页声明通过。
 
 异常 cleanup 的资源释放是单独的行为修复：`cleanup_transaction_resources` 在某个 stage cleanup 或 binding close 失败时，继续处理其余本次已取得资源，最后传播第一原异常，不改异常类型/原因。未知 inode 的临时文件继续保留，拒绝/rollback/授权门禁不变；CLI 的 borrowed binding 只由原所有者关闭。独立测试应在前一个纯收敛提交复现“后续 fd 未关闭”，再在修复提交证明红转绿。
+
+## callback 目标的唯一性
+
+开发候选的 callback patcher 对 legacy 与 TurnRunner 共用唯一候选选择：先保留已有 required-call 优先级，再要求最终只有一个目标。唯一候选的兼容 fallback 保持；多个同等候选时不猜测第一个。owned marker 只能证明块归属，不能证明 callback 仍然接线，因此每次 apply 都移除原块并重新验证目标，包括没有 required calls 的 progress/interim 路径。
+
+无法确认的 optional seam 保持未注入，required seam 仍由已有安装门禁判定。marker/render/apply/remove 继续由 patcher 负责，没有新增 producer 或执行状态。该行为修复独立于前面的结构提取，完成情况以精确候选的独立歧义、旧 marker、TTS 优先级、实际 callback 执行及幂等恢复测试为准。
