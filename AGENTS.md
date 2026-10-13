@@ -55,10 +55,19 @@ Python 3.9 runtime coverage remains separate from this development-tool runtime.
 | Config, installation and safe recovery | `config.py`, `cli.py`, `install/` |
 | Process credentials and service ownership | `process.py`, `runner.py`, `persistent_service.py` |
 | Bounded display/notice persistence | `session_store.py`, `notice_lifecycle.py` |
+| Current-owner input freeze and receipt replacement policy | `owner_display_policy.py` |
+| Borrowed live registry/controller cleanup state | `lifecycle.py` (`CleanupState`); `server.py` supplies the AppKey adapter |
+| Confirmed continuation message navigation and button budget | `message_navigation.py`; `server.py` commits only after delivery/owner transfer |
+| Secure directory-bound file/stage I/O and cleanup | `install/posix_transaction.py`; Recovery/Integrity retain their planner/lock/Git/fingerprint gates; portable I/O stays in `install/file_transaction.py` |
 
 Read [implemented boundaries and compatibility names](docs/wiki/refactor-boundaries.md)
 when moving an existing helper. New internal callers import its implementation
 owner; test fault injection must target the real I/O module.
+
+Read [interaction protocol](docs/wiki/interaction-protocol.md) for runtime
+admission, callback and expiry ownership. Keep the original runtime handle as
+the sole execution claim; server retains lock/compare-and-commit orchestration.
+Do not add another resolver, claim registry or display owner just to move code.
 
 Keep event normalization, state decisions, rendering and external I/O separable.
 New substantial behavior belongs in a focused module with a tested boundary,

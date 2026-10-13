@@ -18,6 +18,8 @@
 
 ## 阅读路径
 
+[交互责任与提交顺序](interaction-protocol.md) 说明 runtime admission、callback、到期与回执的唯一责任方，以及锁内核验和锁外投递的顺序。
+
 1. [维护指南](maintenance-guide.md)
    - 适合改代码前阅读，说明 hot files、风险边界和测试矩阵。
 2. [事件流和卡片生命周期](event-flow.md)
