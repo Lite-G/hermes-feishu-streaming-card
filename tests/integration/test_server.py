@@ -13396,12 +13396,33 @@ async def test_topic_approval_expiry_updates_current_card_without_main_stream_se
     assert not interaction_buttons(card)
 
 
+def _preflight_owner_state(session):
+    if session is None:
+        return None
+    return copy.deepcopy({
+        key: vars(value) if key in {"thinking_normalizer", "answer_normalizer"} else value
+        for key, value in vars(session).items()
+    })
+
+
 @pytest.mark.parametrize("existing_session", [False, True])
 async def test_oversized_interaction_declines_before_claiming_or_sending(client, existing_session):
     test_client, feishu_client = client
     if existing_session:
         await test_client.post("/events", json=event_payload("message.started", 0))
+    owner = next(iter(test_client.app[SESSIONS_KEY].values()), None)
+    owner_before = _preflight_owner_state(owner)
+    state_keys = (
+        SESSION_ALIASES_KEY, REDIRECT_SESSION_ALIASES_KEY,
+        FEISHU_MESSAGE_IDS_KEY, MESSAGE_BOT_IDS_KEY, SESSION_CARD_CONFIGS_KEY,
+        INTERACTION_RESULTS_KEY, INTERACTION_RESULT_SESSION_KEYS_KEY,
+        sidecar_server.RUNTIME_INTERACTION_RESERVATIONS_KEY,
+    )
+    session_keys = set(test_client.app[SESSIONS_KEY])
+    before = {key: copy.deepcopy(test_client.app[key]) for key in state_keys}
     sent_count = len(feishu_client.sent)
+    updates = list(feishu_client.updated)
+    texts = list(feishu_client.texts)
     response = await test_client.post("/events", json=event_payload("interaction.requested", 1, {
         "interaction_id": "too-large-choice", "kind": "approval", "prompt": "授权",
         "options": [{"label": "完整说明" * 4000, "value": "once"}],
@@ -13411,6 +13432,41 @@ async def test_oversized_interaction_declines_before_claiming_or_sending(client,
     assert len(feishu_client.sent) == sent_count
     assert all(session.active_interaction is None for session in test_client.app[SESSIONS_KEY].values())
     assert "too-large-choice" not in test_client.app[INTERACTION_RESULTS_KEY]
+    assert feishu_client.updated == updates and feishu_client.texts == texts
+    assert set(test_client.app[SESSIONS_KEY]) == session_keys
+    assert all(test_client.app[key] == before[key] for key in state_keys)
+    if owner is None:
+        assert test_client.app[SESSIONS_KEY] == {}
+    else:
+        assert next(iter(test_client.app[SESSIONS_KEY].values())) is owner
+        assert _preflight_owner_state(owner) == owner_before and owner.last_sequence == 0
+
+
+async def test_duplicate_interaction_preflight_skips_renderer_and_keeps_original_owner(client, monkeypatch):
+    test_client, feishu_client = client
+    await test_client.post("/events", json=event_payload("message.started", 0))
+    payload = event_payload("interaction.requested", 1, {
+        "interaction_id": "duplicate-choice", "kind": "approval", "prompt": "Review",
+        "options": [{"label": "Allow once", "value": "once"}],
+    })
+    admitted = await test_client.post("/events", json=payload)
+    assert admitted.status == 200 and (await admitted.json())["applied"] is True
+    owner = next(iter(test_client.app[SESSIONS_KEY].values()))
+    before = _preflight_owner_state(owner)
+    sent_count = len(feishu_client.sent)
+    updates = list(feishu_client.updated)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("duplicate interaction rendered or re-evaluated card capacity")
+
+    monkeypatch.setattr(sidecar_server, "_render_session_card_result_for_app", forbidden)
+    replay = await test_client.post("/events", json=payload)
+    assert replay.status == 200
+    body = await replay.json()
+    assert body["applied"] is False and "reason" not in body
+    assert next(iter(test_client.app[SESSIONS_KEY].values())) is owner
+    assert _preflight_owner_state(owner) == before
+    assert len(feishu_client.sent) == sent_count and feishu_client.updated == updates
 
 
 async def test_approval_preflight_uses_compact_card_even_after_long_answer(client):
