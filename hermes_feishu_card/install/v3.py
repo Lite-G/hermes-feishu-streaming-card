@@ -289,6 +289,16 @@ def execute_fixed_tag_hybrid_install(
 
     try:
         ownership = plugin_install.enable_plugin(binding, preimage)
+    except plugin_install.PluginConfigRefused as exc:
+        # These fixed reasons distinguish a config ownership refusal from an
+        # official command failure. Never expose arbitrary exception content.
+        reason = str(exc)
+        if reason not in {
+            "Hermes config changed after preimage",
+            "official plugin enable changed unrelated config",
+        }:
+            reason = "official plugin enable failed"
+        raise FixedTagInstallRefused(reason) from exc
     except Exception as exc:
         raise FixedTagInstallRefused("official plugin enable failed") from exc
     plugin_enabled_manifest = _render_phase_manifest(

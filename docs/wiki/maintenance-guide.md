@@ -334,3 +334,8 @@ Orphaned integrity fences can be explicitly rebound with `integrity acknowledge-
 ## V4.7.7 表格内容保留
 
 原生表格的 1,200 字符限制只决定是否转换，不能截断最终答案；任一表头或单元格超限时整表回退原 Markdown。Markdown 分段若无法安全拆开表头或行，保留整表交给最终 serializer/容量门禁，禁止以折叠提示替代原文。测试必须验证实际正文、task 展示、混合顺序和超限完整交接；session 中保留原文不能替代投递内容完整性。
+
+
+## V3 插件启用诊断
+
+官方 enable 命令失败与配置所有权拒绝分别呈现：preimage 后配置漂移、官方命令修改无关配置保留各自固定错误原因，便于定位。未知异常仍只显示 `official plugin enable failed`，不转发任意异常文本。原始异常通过 cause 保留供受控排查，配置恢复、prepared manifest 和源码写入门禁不变。
