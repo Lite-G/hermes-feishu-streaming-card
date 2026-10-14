@@ -659,7 +659,7 @@ class PluginRuntime:
                     event=event_name,
                     event_id="",
                     producer="patch",
-                    phase="delta",
+                    phase="update",
                     data=self._bound_event_data(turn, {"text": text, "mode": mode}),
                 )
                 return coordinator.submit_observer(
