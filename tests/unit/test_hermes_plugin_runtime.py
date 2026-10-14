@@ -853,6 +853,7 @@ def test_task4_post_llm_is_cache_only_and_failed_end_ignores_nonempty_explanatio
     assert posted[0]["event"] == "message.failed"
     assert posted[0]["event_id"] == "turn:turn-1:failed"
     assert posted[0]["data"] == {
+        "duration": 0.0,
         "error": "消息处理失败",
         "turn_exit_reason": "runtime_error",
         "profile_id": "default",
@@ -912,7 +913,7 @@ def test_task4_only_literal_success_flags_with_exact_cached_answer_complete():
             "event_id": "turn:turn-1:completed",
             "producer": "plugin",
             "phase": "terminal",
-            "data": {"answer": answer, "profile_id": "default", "profile_source": "fallback_default"},
+            "data": {"duration": 0.0, "answer": answer, "profile_id": "default", "profile_source": "fallback_default"},
         }
     ]
     assert runtime.take_terminal_disposition("turn-1") == {
@@ -1819,7 +1820,7 @@ def test_task4_terminal_record_is_deep_copied_one_shot_and_concurrent_take_once(
         records = list(executor.map(lambda _: (barrier.wait(), runtime.take_terminal_record("turn-1"))[1], range(2)))
     assert sum(record is not None for record in records) == 1
     record = next(record for record in records if record is not None)
-    assert record["payload"]["data"] == {"answer": "answer", "profile_id": "default", "profile_source": "fallback_default"}
+    assert record["payload"]["data"] == {"duration": 0.0, "answer": "answer", "profile_id": "default", "profile_source": "fallback_default"}
     record["payload"]["data"]["answer"] = "mutated"
     assert runtime.take_terminal_record("turn-1") is None
     assert runtime.take_terminal_disposition("turn-1") is None
