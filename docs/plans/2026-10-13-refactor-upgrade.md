@@ -345,3 +345,5 @@ T05/T18 的 `da89d6d` 移除 lifecycle 四处对 server 的反向导入，使用
 T11 的 `63bcc49` 实现首个完整可选续答导航：IM成功回执中的message_app_link通过品牌/目标/定位校验后随投递结果传递，新owner确认后旧schema2卡追加“查看续答”。无有效链接或预算不足时保留原文字/正文，不新增请求、配置或授权。未从position猜测链接，独立240项相关场景、docs/preflight135项及Ruff/mypy26模块通过；首审发现client.base_url属性错误，4a41907改用client.config.base_url，原2项产品失败与修复后通过分开留证。普通包与真实客户端点击仍待验；历史五卡API读回不代签本功能。
 
 恢复I/O的bd0c659统一物理操作，0693e81单独修复清理首错跳过其他fd释放；独立三入口先红3项、修后3项通过，364项原Recovery/Integrity/实际CLI回归与40项新增故障测试通过（含重叠，另有Windows专项1跳过），25模块质量检查通过。af97c97固定完整回归运行中。导航与I/O测试路由合并时仅合并JSON中的两组新增路由，后续验证保留install diagnostics与navigation client/interaction/appearance。
+
+2026-10-14 上游兼容更新：固定 Hermes v0.22.0 `e06df9c2eae6901f4c88f464e0ae6e753c0428b8` 与当日 main `0e427d788d253630d38a3a51cd76849e73cd6925`，两组定向源码共 10 项独立检查通过。覆盖能力探测、源码安装/重复/诊断/恢复及 Base 生成方法的实际执行；SDK/runtime 安装检查由原 source-only 测试隔离，不是这两个版本的真实 Gateway 安装或客户端证明。CI 固定提交随此更新，完整云端结果另记。

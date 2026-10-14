@@ -78,41 +78,41 @@
     }
   },
   "latest_stable": {
-    "commit": "71d34bad1045610252eda02ee79549436896e784",
+    "commit": "e06df9c2eae6901f4c88f464e0ae6e753c0428b8",
     "source": "https://github.com/NousResearch/hermes-agent",
     "version": "unknown",
     "decomposed": true,
     "sha256": {
       "gateway/run.py": "5ae263b65d6c02226d079bf7be822b953150aa6a4bdce91745cc67da3e687316",
-      "gateway/run_turn.py": "fd95f66b7fcf21956cb9fd8fbdfb8dd388081066918a29f0a6989be0171d10af",
+      "gateway/run_turn.py": "649449454a479d199553354f0772346ce9a56c63da0c928633e8ef83f6e8bd63",
       "gateway/run_turn_runner.py": "6ec879a91aa09765515a69368c886d1ce4d3174b159868c966e8740e9cf1b347",
-      "gateway/run_inbound.py": "6a1a40708075e3550a824eae5519e98db97f52ea7995154e8c7e941de4e02144",
+      "gateway/run_inbound.py": "f399c90076668e8745e19b640fdcd9a467bd07cc1217a33b38aca00cd38191c1",
       "gateway/run_busy.py": "a6247d2862216543ff1a2bcb2a97a0f51c40fa02604849e0c1f50f8546f64e59",
-      "gateway/run_startup.py": "dc3e496c05f275a7f31f89a006bd000c7e1415aeca969254a597370cc0fcc885",
-      "gateway/run_notifications.py": "c2d157ee63137bb947689b0533cf23c7f6da04cfc73507fbe61ac926536c979a",
+      "gateway/run_startup.py": "913fb4fd24033e674b10fb8c635758619052008c9b17da2c2b152b6a6334474c",
+      "gateway/run_notifications.py": "7ef7f8a893e16356b852610181ad7afcbd54f5d1ecd22b35ce116248fcb201b2",
       "cron/scheduler.py": "d4ec5740fcd99ee9f6be727e927f40ea3edf2c58c2b12a70cfe167f623e705f6",
       "cron/scheduler_delivery.py": "264f9b833288635a3b404741ff55ec9c542989cdad61d11e2b502567b943062e",
-      "gateway/platforms/base.py": "c09968def5166c4ab9f6f08005e65581f54193f5556892f7c49d0a7321f45463",
+      "gateway/platforms/base.py": "96d2f0f680e796232b6d70353c475cf6a0a81b6ebf8ba36de18ad8cb91525fce",
       "hermes_cli/__init__.py": "6a4ab05b8621ec1cd66a5abbe30fa32ed5bddddea95903036da01f0af1af94ce",
       "gateway/authz_mixin.py": "3eb8d398b8b2848cd5b20cca448791fc375e5961c7c42450e795931cd3c6a5c1"
     }
   },
   "latest_main": {
-    "commit": "09e2ffcab79322cdd9037660fe87004bbd8fd18f",
+    "commit": "0e427d788d253630d38a3a51cd76849e73cd6925",
     "source": "https://github.com/NousResearch/hermes-agent",
     "version": "unknown",
     "decomposed": true,
     "sha256": {
       "gateway/run.py": "5ae263b65d6c02226d079bf7be822b953150aa6a4bdce91745cc67da3e687316",
-      "gateway/run_turn.py": "fd95f66b7fcf21956cb9fd8fbdfb8dd388081066918a29f0a6989be0171d10af",
+      "gateway/run_turn.py": "649449454a479d199553354f0772346ce9a56c63da0c928633e8ef83f6e8bd63",
       "gateway/run_turn_runner.py": "6ec879a91aa09765515a69368c886d1ce4d3174b159868c966e8740e9cf1b347",
-      "gateway/run_inbound.py": "6a1a40708075e3550a824eae5519e98db97f52ea7995154e8c7e941de4e02144",
+      "gateway/run_inbound.py": "f399c90076668e8745e19b640fdcd9a467bd07cc1217a33b38aca00cd38191c1",
       "gateway/run_busy.py": "a6247d2862216543ff1a2bcb2a97a0f51c40fa02604849e0c1f50f8546f64e59",
-      "gateway/run_startup.py": "dc3e496c05f275a7f31f89a006bd000c7e1415aeca969254a597370cc0fcc885",
-      "gateway/run_notifications.py": "c2d157ee63137bb947689b0533cf23c7f6da04cfc73507fbe61ac926536c979a",
+      "gateway/run_startup.py": "913fb4fd24033e674b10fb8c635758619052008c9b17da2c2b152b6a6334474c",
+      "gateway/run_notifications.py": "7ef7f8a893e16356b852610181ad7afcbd54f5d1ecd22b35ce116248fcb201b2",
       "cron/scheduler.py": "d4ec5740fcd99ee9f6be727e927f40ea3edf2c58c2b12a70cfe167f623e705f6",
       "cron/scheduler_delivery.py": "264f9b833288635a3b404741ff55ec9c542989cdad61d11e2b502567b943062e",
-      "gateway/platforms/base.py": "c09968def5166c4ab9f6f08005e65581f54193f5556892f7c49d0a7321f45463",
+      "gateway/platforms/base.py": "96d2f0f680e796232b6d70353c475cf6a0a81b6ebf8ba36de18ad8cb91525fce",
       "hermes_cli/__init__.py": "6a4ab05b8621ec1cd66a5abbe30fa32ed5bddddea95903036da01f0af1af94ce",
       "gateway/authz_mixin.py": "3eb8d398b8b2848cd5b20cca448791fc375e5961c7c42450e795931cd3c6a5c1"
     }
