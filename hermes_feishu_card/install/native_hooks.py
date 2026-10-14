@@ -48,6 +48,7 @@ FIXED_TAG_PROVENANCE_ANCHOR_COUNT = 24
 HFC_REGISTERED_HOOKS = frozenset({
     "pre_llm_call",
     "post_llm_call",
+    "post_api_request",
     "on_session_end",
     "on_session_reset",
     "on_session_finalize",
