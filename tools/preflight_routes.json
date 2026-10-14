@@ -145,6 +145,7 @@
       "tests/unit/test_hermes_plugin.py",
       "tests/unit/test_hermes_plugin_runtime.py",
       "tests/unit/test_plugin_profile_routing.py",
+      "tests/unit/test_approval_tool_status.py",
       "tests/unit/test_hybrid_gateway_ownership.py",
       "tests/unit/test_install_plugin.py",
       "tests/unit/test_native_hook_capabilities.py",
