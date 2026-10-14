@@ -457,17 +457,20 @@ def inspect_fixed_tag_hybrid_install(
         installed[target] = current.contents
         backups[target] = backup.contents
     patch_groups = frozenset(integration["patch_groups"])
-    expected_matrix = HYBRID_PATCH_REGISTRY.target_fragments(patch_groups)
+    registry = _installed_patch_registry(installed, backups, patch_groups)
+    expected_matrix = registry.target_fragments(patch_groups)
     try:
         detected = detect_patch_groups_by_target(
             installed,
             expected_groups=patch_groups,
             expected_fragment_matrix=expected_matrix,
+            registry=registry,
         )
         restored = remove_patch_snapshots(
             installed,
             expected_groups=patch_groups,
             expected_fragment_matrix=expected_matrix,
+            registry=registry,
         )
     except Exception as exc:
         raise FixedTagInstallRefused("installed Hybrid patch is invalid") from exc
@@ -477,11 +480,42 @@ def inspect_fixed_tag_hybrid_install(
     }
     if detected != expected_targets or restored != backups:
         raise FixedTagInstallRefused("installed Hybrid patch ownership is inconsistent")
+    if registry is not HYBRID_PATCH_REGISTRY:
+        raise FixedTagInstallRefused(
+            "verified historical Hybrid revision requires official restore --yes "
+            "with the same --hermes-dir and --hermes-home, then install"
+        )
     return FixedTagInstallResult(
         status="installed",
         manifest_path=manifest_path,
         gateway_restart_required=False,
     )
+
+
+def _installed_patch_registry(installed, backups, patch_groups):
+    """Select only an exact known rendering after callers verify manifest hashes."""
+    from .hybrid_renderers import historical_terminal_registry
+
+    provenance = load_fixed_tag_native_hook_provenance(FIXED_TAG_PROVENANCE_PATH)
+    canonical = {
+        source.relative_path: source.sha256.removeprefix("sha256:")
+        for source in provenance.sources
+        if source.relative_path in HYBRID_PATCH_TARGET_ORDER
+    }
+    for registry in (HYBRID_PATCH_REGISTRY,
+                     historical_terminal_registry(HYBRID_PATCH_REGISTRY)):
+        matrix = registry.target_fragments(patch_groups)
+        try:
+            rendered = render_patch_snapshots_from_verified_originals(
+                backups, verified_original_sha256=canonical,
+                integration_mode="hybrid", required_patch_groups=patch_groups,
+                expected_fragment_matrix=matrix, registry=registry,
+            )
+        except (TypeError, ValueError):
+            continue
+        if rendered == installed:
+            return registry
+    raise FixedTagInstallRefused("installed Hybrid patch is not an exact known revision")
 
 
 def restore_fixed_tag_hybrid_install(
@@ -539,17 +573,20 @@ def restore_fixed_tag_hybrid_install(
         backups[target] = backup_snapshot.contents
     if phase == "installed":
         patch_groups = frozenset(integration["patch_groups"])
-        expected_matrix = HYBRID_PATCH_REGISTRY.target_fragments(patch_groups)
+        registry = _installed_patch_registry(installed, backups, patch_groups)
+        expected_matrix = registry.target_fragments(patch_groups)
         try:
             detected = detect_patch_groups_by_target(
                 installed,
                 expected_groups=patch_groups,
                 expected_fragment_matrix=expected_matrix,
+                registry=registry,
             )
             restored = remove_patch_snapshots(
                 installed,
                 expected_groups=patch_groups,
                 expected_fragment_matrix=expected_matrix,
+                registry=registry,
             )
         except Exception as exc:
             raise FixedTagInstallRefused("installed Hybrid patch is invalid") from exc

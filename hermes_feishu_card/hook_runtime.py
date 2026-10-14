@@ -717,6 +717,47 @@ def bind_ingress_from_hermes_locals(local_vars: object) -> bool:
         return False
 
 
+class _HybridProgressOwnership:
+    """Bounded presentation receipt owned by a single Hermes TurnContext."""
+
+    def __init__(self, owner: object, runtime: object, route: tuple[object, ...]):
+        self.owner = owner
+        self.runtime = runtime
+        self.route = route
+
+
+def suppress_hybrid_native_progress(local_vars: object, *, owner: object = None) -> bool:
+    """Read current card ownership; unknown routing always keeps native delivery."""
+    try:
+        turn_id = _thin_bridge_turn(local_vars)
+        if turn_id is None:
+            return False
+        assert type(local_vars) is dict
+        values = tuple(local_vars.get(name) for name in (
+            "gateway_session_key", "generation", "chat_id", "profile_id",
+        ))
+        thread_id = local_vars.get("thread_id")
+        if not all(_exact_nonblank_string(value) for value in values):
+            return False
+        if type(thread_id) is not str:
+            return False
+        runtime = _plugin_runtime()
+        if runtime is None or runtime.progress_owner_live() is not True:
+            return False
+        route = (turn_id, *values, thread_id)
+        previous = getattr(owner, "_hfc_progress_ownership", None)
+        if (type(previous) is _HybridProgressOwnership and previous.owner is owner
+                and previous.runtime is runtime and previous.route == route):
+            return True
+        method = getattr(runtime, "owns_native_progress", None)
+        accepted = callable(method) and method(*route) is True
+        if accepted and owner is not None:
+            owner._hfc_progress_ownership = _HybridProgressOwnership(owner, runtime, route)
+        return accepted
+    except Exception:
+        return False
+
+
 def emit_delta_from_hermes_locals_threadsafe(
     local_vars: object,
     event_name: object,

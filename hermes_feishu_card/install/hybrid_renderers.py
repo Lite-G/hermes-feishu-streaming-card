@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from collections.abc import Callable
 
-from .patch_descriptors import PatchGroupDescriptor
+from .patch_descriptors import PatchDescriptorRegistry, PatchGroupDescriptor
 
 
 _REVISION = "fixed-tag-v2026.8.3-r1"
@@ -219,7 +220,7 @@ def _render_turn_clear(content: bytes, descriptor: PatchGroupDescriptor) -> byte
     return _insert_at_line(content, anchor=anchor, block=block, before=False)
 
 
-def _render_terminal_gateway(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
+def _render_terminal_gateway_v1(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
     text, newline = _decode(content)
     anchor = 'response = agent_result.get("final_response") or ""'
     line = next((item for item in text.splitlines() if item.strip() == anchor), None)
@@ -241,6 +242,96 @@ def _render_terminal_gateway(content: bytes, descriptor: PatchGroupDescriptor) -
         newline,
     )
     return _insert_at_line(content, anchor=anchor, block=block, before=False)
+
+
+def _render_terminal_gateway(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
+    text, newline = _decode(content)
+    block = _marker_block(descriptor.fragments[0], "            ", (
+        "try:",
+        "    from hermes_feishu_card.hook_runtime import apply_hybrid_terminal_record as _hfc_apply_terminal",
+        '    _hfc_record = agent_result.pop("_hfc_terminal_record", None)',
+        '    if response == agent_result.get("final_response") and "MEDIA:" not in response:',
+        '        if _hfc_apply_terminal(_hfc_record) == "card":',
+        '            response = ""',
+        "except Exception:",
+        "    pass",
+    ), newline)
+    rendered = _insert_in_function(
+        content, function_name="_handle_message_with_agent", anchor="return response",
+        block=block, before=True, anchor_indent="            ",
+    )
+    text, newline = _decode(rendered)
+    tree = ast.parse(text)
+    runners = [node for node in tree.body if isinstance(node, ast.ClassDef)
+               and node.name == "TurnRunner"]
+    functions = [node for runner in runners for node in runner.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "run_sync"]
+    if len(functions) != 1:
+        raise ValueError("fixed-tag terminal result projection missing")
+    returns = sorted(
+        (node for node in ast.walk(functions[0])
+         if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+         and {"final_response", "history_offset"}.issubset(
+             {key.value for key in node.value.keys if isinstance(key, ast.Constant)}
+         )),
+        key=lambda node: node.lineno,
+    )
+    if len(returns) != 2 or len(descriptor.fragments) != 6:
+        raise ValueError("fixed-tag terminal result projection changed")
+    lines = text.splitlines(keepends=True)
+    for node, fragment in reversed(list(zip(returns, descriptor.fragments[1:3]))):
+        if lines[node.lineno - 1].strip() != "return {":
+            raise ValueError("fixed-tag terminal result return shape changed")
+        lines.insert(node.lineno, _marker_block(
+            fragment, _indent(lines[node.lineno - 1]) + "    ",
+            ('"_hfc_terminal_record": (result.get("_hfc_terminal_record")',
+             '    if final_response == result.get("final_response") else None),'),
+            newline,
+        ))
+    rendered_text = "".join(lines)
+    compile(rendered_text, "<hybrid-terminal-carrier>", "exec")
+    rendered = rendered_text.encode("utf-8")
+    for fragment, function, anchor, before, action, anchor_indent in (
+        (descriptor.fragments[3], "progress_callback",
+         "if not ctx.progress_queue or not ctx._run_still_current():", True, "return", "        "),
+        (descriptor.fragments[4], "send_progress_messages",
+         "raw = ctx.progress_queue.get_nowait()", False, "continue", "                "),
+        (descriptor.fragments[5], "send_progress_messages",
+         "except asyncio.CancelledError:", False, "return", "            "),
+    ):
+        current, newline = _decode(rendered)
+        node = next(n for n in ast.walk(ast.parse(current))
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and n.name == function)
+        source_lines = current.splitlines()
+        anchors = [line for line in source_lines[node.lineno - 1:node.end_lineno]
+                   if line.strip() == anchor and _indent(line) == anchor_indent]
+        if len(anchors) != 1:
+            raise ValueError("fixed-tag progress boundary changed")
+        block_indent = anchor_indent + ("    " if anchor == "except asyncio.CancelledError:" else "")
+        block = _marker_block(fragment, block_indent, (
+            "try:",
+            "    from hermes_feishu_card.hook_runtime import suppress_hybrid_native_progress as _hfc_suppress_progress",
+            '    _hfc_progress_agent = ctx.agent_holder[0]',
+            '    _hfc_progress_profile = getattr(ctx.source, "profile", None)',
+            '    if ctx._run_still_current() and _hfc_suppress_progress({',
+            '        "_hfc_authorized": True,',
+            '        "platform": getattr(ctx.source.platform, "value", ctx.source.platform),',
+            '        "turn_id": getattr(_hfc_progress_agent, "_current_turn_id", None),',
+            '        "gateway_session_key": ctx.session_key,',
+            '        "generation": str(ctx.run_generation),',
+            '        "chat_id": ctx.source.chat_id,',
+            '        "thread_id": getattr(ctx.source, "thread_id", "") or "",',
+            '        "profile_id": _hfc_progress_profile or "default",',
+            '    }, owner=ctx):',
+            "        " + action,
+            "except Exception:",
+            "    pass",
+        ), newline)
+        rendered = _insert_in_function(rendered, function_name=function,
+                                      anchor=anchor, block=block, before=before,
+                                      anchor_indent=anchor_indent)
+    return rendered
 
 
 def _render_answer_delta(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
@@ -910,7 +1001,25 @@ def reviewed_descriptors(
                 fragments=descriptor.fragments,
                 renderer=render,
                 remover=remove,
-                renderer_revision=_REVISION,
+                renderer_revision=("fixed-tag-v2026.8.3-terminal-r2"
+                                   if descriptor.group == "terminal_disposition" else _REVISION),
             )
         )
     return tuple(reviewed)
+
+
+def historical_terminal_registry(registry: PatchDescriptorRegistry) -> PatchDescriptorRegistry:
+    """Exact pre-carrier renderer, solely for verified installed-state recovery."""
+    descriptors = []
+    for descriptor in registry.descriptors:
+        if (descriptor.group, descriptor.target) != ("terminal_disposition", "gateway/run.py"):
+            descriptors.append(descriptor)
+            continue
+        historical = replace(descriptor, fragments=descriptor.fragments[:1])
+        descriptors.append(replace(
+            historical,
+            renderer=lambda content, d=historical: _render_terminal_gateway_v1(content, d),
+            remover=lambda content, d=historical: _remove_fragments(content, d),
+            renderer_revision="fixed-tag-v2026.8.3-r1",
+        ))
+    return replace(registry, descriptors=tuple(descriptors))

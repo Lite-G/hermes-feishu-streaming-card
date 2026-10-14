@@ -626,6 +626,32 @@ class PluginRuntime:
             turn = self._turns.get(turn_id) if self._exact_nonblank(turn_id) else None
         return turn.state if turn is not None else None
 
+    def progress_owner_live(self) -> bool:
+        with self._lock:
+            return not self._closed
+
+    def owns_native_progress(
+        self, turn_id: object, session_key: object, generation: object,
+        chat_id: object, profile_id: object, thread_id: object,
+    ) -> bool:
+        """Consult the existing accepted turn, never claim another delivery path."""
+        if not all(self._exact_nonblank(value) for value in (
+            turn_id, session_key, generation, chat_id, profile_id,
+        )) or type(thread_id) is not str:
+            return False
+        with self._lock:
+            self._expire_locked(self._now())
+            turn = self._turns.get(turn_id)
+            return bool(
+                turn is not None
+                and turn.state is TurnState.CARD_ACTIVE
+                and turn.ingress.gateway_session_key == session_key
+                and turn.ingress.generation == generation
+                and turn.ingress.chat_id == chat_id
+                and turn.ingress.profile_id == profile_id
+                and turn.ingress.thread_id == thread_id
+            )
+
     def submit_patch_delta(
         self,
         turn_id: object,
