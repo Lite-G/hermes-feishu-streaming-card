@@ -32,6 +32,7 @@
 - Feishu topic 场景必须保留 `source.message_id` 和 `reply_to_message_id`；首回复建 thread 的 `reply_in_thread` 意图还必须进入 `CardSession`，并通过普通交互与 `RuntimeInteractionDeliveryReservation` 的所有新卡发送路径继续传递。create API 不接受 `receive_id_type=thread_id`：无 reply anchor 时实际发送必须回落父 `chat_id`，但 native-handoff 的 logical topic route/UUID identity 仍保持稳定。
 - `message.started` 必须从真实入站 `event.message_id` 绑定 `turn_id`；同一 `source` 的 stream/tool/terminal 回调复用这个 immutable identity。显式 `turn_id` 是 canonical turn hard fence，不能被 `message_id` 或 `reply_to_message_id` alias 覆盖；无法在 `source` 绑定私有属性时保持 legacy fail-open。
 - 官方 PluginRuntime 的所有事件还必须保留同一 ingress 的 `profile_id` / `profile_source`，包括 patch delta、状态提示、交互准入、工具观察和结束事件。事件 data 由统一身份绑定函数构造，调用方数据不得覆盖已验证的 profile；不能只在 started 写入身份，否则后续事件会创建另一份 session，留下未收尾卡片。
+- patch delta 使用协议支持的 `phase=update`。最终 `message.completed` / `message.failed` 的 HTTP 确认沿用运行时的 10 秒上限，并受调用者更短预算约束；不能再被普通 observer 超时截短。其他事件保留原 observer 上限，未知结果仍不冒充成功。
 - stable tool lifecycle 与 legacy progress callback 不能同时投递同一调用；wrapper 检测必须读取 agent 当前实际 callback，显式 fallback 标记仅用于卡片路径未接受时恢复原生进度。
 - 已识别 `system.notice` 必须按 sidecar 结果分流：已有卡片异步更新的 `accepted` 与独立卡首次投递的 `delivered` 抑制原生文本，`not_sent` 回退原始通知文本，`unknown` 只尝试固定通用提示且不重复原始通知文本；`accepted` 必须同时带有 `applied=true`，不可解析响应一律视为 `unknown`。
 - 上下文压缩只从 `_status_callback_sync` 的固定 `Compacting context` 标记产生 `context-compaction`；不得用静默 watchdog、普通 compression 文本或虚构百分比推断。
