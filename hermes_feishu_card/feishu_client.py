@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from ipaddress import ip_address
 from numbers import Real
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, Optional, Union
 from urllib.parse import quote, urlparse
 
 import aiohttp

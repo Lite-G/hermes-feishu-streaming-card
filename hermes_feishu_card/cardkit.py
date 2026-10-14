@@ -6,8 +6,6 @@ fall back to an independent IM send.
 """
 from __future__ import annotations
 
-from .delivery import FeishuAPIError
-
 import asyncio
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -19,6 +17,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .card_limits import serialize_card_for_delivery
+from .delivery import FeishuAPIError
 
 
 logger = logging.getLogger(__name__)
