@@ -149,7 +149,8 @@
       "tests/unit/test_hybrid_gateway_ownership.py",
       "tests/unit/test_install_plugin.py",
       "tests/unit/test_native_hook_capabilities.py",
-      "tests/unit/test_native_probe_diagnostics.py"
+      "tests/unit/test_native_probe_diagnostics.py",
+      "tests/unit/test_clarify_delivery_admission.py"
     ],
     "storage": [
       "tests/unit/test_session_store.py",
@@ -199,7 +200,8 @@
       "tests/unit/test_install_v3_transaction.py",
       "tests/unit/test_hybrid_gateway_ownership.py",
       "tests/unit/test_bound_recovery_io.py",
-      "tests/unit/test_recovery.py"
+      "tests/unit/test_recovery.py",
+      "tests/unit/test_clarify_delivery_admission.py"
     ],
     "loaded_config": [
       "tests/unit/test_config_snapshot.py",
@@ -264,6 +266,10 @@
     ],
     "hermes_feishu_card/hermes_plugin.py": [
       "plugin"
+    ],
+    "hermes_feishu_card/turn_metrics.py": [
+      "plugin",
+      "render"
     ],
     "hermes_feishu_card/turn_events.py": [
       "plugin",

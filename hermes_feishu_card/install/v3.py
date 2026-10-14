@@ -494,7 +494,9 @@ def inspect_fixed_tag_hybrid_install(
 
 def _installed_patch_registry(installed, backups, patch_groups):
     """Select only an exact known rendering after callers verify manifest hashes."""
-    from .hybrid_renderers import historical_terminal_registry
+    from .hybrid_renderers import (
+        historical_clarify_registry, historical_publish_registry, historical_terminal_registry,
+    )
 
     provenance = load_fixed_tag_native_hook_provenance(FIXED_TAG_PROVENANCE_PATH)
     canonical = {
@@ -502,8 +504,12 @@ def _installed_patch_registry(installed, backups, patch_groups):
         for source in provenance.sources
         if source.relative_path in HYBRID_PATCH_TARGET_ORDER
     }
-    for registry in (HYBRID_PATCH_REGISTRY,
-                     historical_terminal_registry(HYBRID_PATCH_REGISTRY)):
+    registries = [HYBRID_PATCH_REGISTRY]
+    for historical_variant in (
+        historical_terminal_registry, historical_publish_registry, historical_clarify_registry,
+    ):
+        registries.extend(historical_variant(registry) for registry in tuple(registries))
+    for registry in registries:
         matrix = registry.target_fragments(patch_groups)
         try:
             rendered = render_patch_snapshots_from_verified_originals(

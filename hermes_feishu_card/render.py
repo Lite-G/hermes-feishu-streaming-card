@@ -2762,14 +2762,14 @@ def _render_footer(
         # (it used to be appended last, after ctx); it carries a hash, per the user's request.
         selected.append(f"工具 #{session.tool_count}")
     fields = DEFAULT_FOOTER_FIELDS if footer_fields is None else footer_fields
-    if compact:
-        available = {
-            "duration": duration > 0, "model": model != "Unknown",
-            "input_tokens": "input_tokens" in tokens,
-            "output_tokens": "output_tokens" in tokens,
-            "context": max_context > 0, "subscription_usage": bool(subscription_usage),
-        }
-        fields = [field for field in fields if available.get(field, False)]
+    available = {
+        "duration": duration > 0, "model": model != "Unknown",
+        "input_tokens": "input_tokens" in tokens,
+        "output_tokens": "output_tokens" in tokens,
+        "context": max_context > 0 and "used_tokens" in context,
+        "subscription_usage": bool(subscription_usage),
+    }
+    fields = [field for field in fields if available.get(field, False)]
     for field in fields:
         value = values.get(field)
         if value:

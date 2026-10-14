@@ -166,13 +166,14 @@ def _render_ingress_run(content: bytes, descriptor: PatchGroupDescriptor) -> byt
     )
 
 
-def _render_turn_publish(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
+def _render_turn_publish(content: bytes, descriptor: PatchGroupDescriptor, *, metrics: bool = True) -> bytes:
     text, newline = _decode(content)
     anchor = "agent._current_turn_id = turn_id"
     line = next((item for item in text.splitlines() if item.strip() == anchor), None)
     if line is None:
         raise ValueError("fixed-tag canonical publish anchor missing")
     indent = _indent(line)
+    publish_args = "turn_id, metrics_agent=agent" if metrics else "turn_id"
     block = _marker_block(
         descriptor.fragments[0],
         indent,
@@ -180,7 +181,7 @@ def _render_turn_publish(content: bytes, descriptor: PatchGroupDescriptor) -> by
             "try:",
             "    from hermes_feishu_card.hook_runtime import publish_canonical_turn_id as _hfc_publish_turn",
             "    _hfc_platform = getattr(getattr(agent, \"platform\", None), \"value\", getattr(agent, \"platform\", None))",
-            "    agent._hfc_canonical_turn_token = _hfc_publish_turn(turn_id) if _hfc_platform == \"feishu\" else None",
+            f'    agent._hfc_canonical_turn_token = _hfc_publish_turn({publish_args}) if _hfc_platform == "feishu" else None',
             "except Exception:",
             "    agent._hfc_canonical_turn_token = None",
         ),
@@ -675,7 +676,7 @@ def _render_exact_base_final_delivery(content: bytes, descriptor: PatchGroupDesc
     return _insert_at_line(content, anchor=anchor, block=block, before=True)
 
 
-def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:
+def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor, *, preserve_owned: bool = True) -> bytes:
     _text, newline = _decode(content)
     indent = " " * 12
     register_fragment, resolve_fragment = descriptor.fragments
@@ -721,6 +722,7 @@ def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor)
             "            return f\"[user did not respond within {int(_hfc_clarify_timeout / 60)}m]\"",
             "        return _hfc_clarify_response",
             "except Exception:",
+            *(("    if _hfc_clarify_owned:", "        raise") if preserve_owned else ()),
             "    _hfc_clarify_owned = False",
         ),
         newline,
@@ -1016,7 +1018,12 @@ def reviewed_descriptors(
                 renderer=render,
                 remover=remove,
                 renderer_revision=("fixed-tag-v2026.8.3-terminal-r2"
-                                   if descriptor.group == "terminal_disposition" else _REVISION),
+                                   if descriptor.group == "terminal_disposition" else
+                                   "fixed-tag-v2026.8.3-metrics-r2"
+                                   if (descriptor.group, descriptor.target) == ("ingress_binding", "agent/turn_context.py")
+                                   else "fixed-tag-v2026.8.3-clarify-r2"
+                                   if descriptor.group == "clarify_round_trip"
+                                   else _REVISION),
             )
         )
     return tuple(reviewed)
@@ -1037,3 +1044,25 @@ def historical_terminal_registry(registry: PatchDescriptorRegistry) -> PatchDesc
             renderer_revision="fixed-tag-v2026.8.3-r1",
         ))
     return replace(registry, descriptors=tuple(descriptors))
+
+
+def historical_publish_registry(registry: PatchDescriptorRegistry) -> PatchDescriptorRegistry:
+    """Exact pre-metrics carrier, for verified official restore only."""
+    descriptors = tuple(
+        replace(d, renderer=lambda content, d=d: _render_turn_publish(content, d, metrics=False),
+                renderer_revision=_REVISION)
+        if (d.group, d.target) == ("ingress_binding", "agent/turn_context.py") else d
+        for d in registry.descriptors
+    )
+    return replace(registry, descriptors=descriptors)
+
+
+def historical_clarify_registry(registry: PatchDescriptorRegistry) -> PatchDescriptorRegistry:
+    """Exact pre-owned-wait guard, for verified official restore only."""
+    descriptors = tuple(
+        replace(d, renderer=lambda content, d=d: _render_clarify_round_trip(content, d, preserve_owned=False),
+                renderer_revision=_REVISION)
+        if d.group == "clarify_round_trip" else d
+        for d in registry.descriptors
+    )
+    return replace(registry, descriptors=descriptors)

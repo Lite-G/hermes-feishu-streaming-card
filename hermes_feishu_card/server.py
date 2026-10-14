@@ -727,6 +727,7 @@ def create_app(
     app.router.add_post(CONTROL_CARD_CONFIG_PATH, _control_card_config)
     app.router.add_get("/messages/{message_id}/summary", _message_summary)
     app.router.add_get("/interactions/{interaction_id}", _interaction_result)
+    app.router.add_get("/interactions/{interaction_id}/delivery", _interaction_delivery_result)
     app.router.add_post("/card/actions", _card_actions)
     app.router.add_post("/commands", _commands)
     app.router.add_post("/runtime/events", _runtime_events)
@@ -1080,6 +1081,23 @@ async def _message_summary(request: web.Request) -> web.Response:
     if summary is None:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     return web.json_response({"ok": True, **summary})
+
+
+async def _interaction_delivery_result(request: web.Request) -> web.Response:
+    """Read detached delivery evidence without refreshing or expiring a waiter."""
+    auth_failure = await _authenticate_sensitive_request(request)
+    if auth_failure is not None:
+        return auth_failure
+    interaction_id = request.match_info["interaction_id"]
+    result = request.app[INTERACTION_RESULTS_KEY].get(interaction_id)
+    fingerprint = result.get("runtime_admission_fingerprint") if type(result) is dict else None
+    if type(fingerprint) is not str or not fingerprint:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
+    return web.json_response({
+        "ok": True,
+        "interaction_id": interaction_id,
+        "runtime_admission_fingerprint": fingerprint,
+    })
 
 
 async def _interaction_result(request: web.Request) -> web.Response:
@@ -6144,6 +6162,9 @@ async def _complete_runtime_interaction_delivery(
         animation_task = app[CARD_ANIMATION_TASKS_KEY].pop(
             reservation.session_key, None
         )
+        # Delivery evidence belongs to this exact interaction, never to a
+        # reused id or session key. It grants no execution authority.
+        reservation.interaction.runtime_delivery_fingerprint = reservation.admission_fingerprint
         _store_interaction_result(app, reservation.session)
         reservations.pop(reservation.session_key, None)
         committed = True
@@ -6286,6 +6307,8 @@ def _store_interaction_result(app: web.Application, session: CardSession) -> Non
         "choice": interaction.choice,
         "choice_label": interaction.choice_label,
     }
+    if interaction.runtime_delivery_fingerprint:
+        result["runtime_admission_fingerprint"] = interaction.runtime_delivery_fingerprint
     if interaction.pause_on_timeout:
         result["pause_on_timeout"] = True
     if interaction.error:

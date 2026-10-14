@@ -118,6 +118,8 @@ class InteractionState:
     reply_in_thread: bool = False
     runtime_admission: object | None = field(default=None, repr=False)
     runtime_turn_id: str = field(default="", repr=False)
+    # Ephemeral delivery evidence; active_interaction is excluded from checkpoints.
+    runtime_delivery_fingerprint: str = field(default="", repr=False)
     # The approval card's own Feishu message id, recorded when the card is delivered. A timed-out
     # approval refreshes THAT card in place instead of sending a second paused card (#314).
     feishu_message_id: str = ""

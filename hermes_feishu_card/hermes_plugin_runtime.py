@@ -9,6 +9,7 @@ from hashlib import sha256
 import hmac
 from math import isfinite
 import atexit
+import asyncio
 import json
 import os
 import re
@@ -20,7 +21,9 @@ from typing import Any
 from urllib import parse, request
 
 from . import __version__
-from .event_auth import sign_event_request
+from .turn_metrics import TurnMetrics, metric_label
+from .event_auth import sign_event_request, sign_sidecar_request
+from .interaction_rules import runtime_admission_fingerprint
 from .events import completion_turn_outcome
 from .operations_transport import read_transport_root_secret
 from .profile_sources import TRUSTED_PROFILE_SOURCES
@@ -31,7 +34,7 @@ from .turn_events import ObserverEvent, TurnEventCoordinator
 
 
 OFFICIAL_HOOKS = (
-    "pre_llm_call", "post_llm_call", "on_session_end",
+    "pre_llm_call", "post_llm_call", "post_api_request", "on_session_end",
     "on_session_reset", "on_session_finalize", "pre_tool_call",
     "post_tool_call", "pre_approval_request", "post_approval_response",
     "subagent_start", "subagent_stop",
@@ -108,12 +111,20 @@ class SignedEventTransport:
             requested_timeout = float(timeout_seconds)
             if not isfinite(requested_timeout) or requested_timeout <= 0:
                 return None
-            # Final delivery waits for the card PATCH acknowledgement. Honor
-            # the runtime's bounded terminal budget instead of silently
-            # shortening it to the observer budget.
+            # Admission waits for delivered UI, just as final delivery waits
+            # for PATCH. Truncating either ACK to the observer budget can send
+            # native text after a card has already reached the user.
+            data = payload.get("data")
+            admission = data.get("_hfc_runtime_admission") if type(data) is dict else None
+            waits_for_admission = (
+                payload.get("event") == "interaction.requested"
+                and payload.get("producer") == "patch"
+                and type(admission) is dict
+                and admission.get("protocol") == "hfc-runtime-interaction-v1"
+            )
             timeout_cap = (
                 DEFAULT_TERMINAL_TIMEOUT_SECONDS
-                if payload.get("event") in ("message.completed", "message.failed")
+                if waits_for_admission or payload.get("event") in ("message.completed", "message.failed")
                 else self._timeout_seconds
             )
             timeout = min(requested_timeout, timeout_cap)
@@ -146,6 +157,76 @@ class SignedEventTransport:
             return value
         except Exception:
             return None
+
+
+    def confirm_interaction_delivery(self, payload: dict[str, object], timeout_seconds: float) -> bool:
+        """Recover a lost ACK with bounded authenticated reads, never a second POST."""
+        data = payload.get("data")
+        if type(data) is not dict:
+            return False
+        interaction_id = data.get("interaction_id")
+        descriptor = data.get("_hfc_runtime_admission")
+        if type(interaction_id) is not str or not 0 < len(interaction_id) <= 256 or type(descriptor) is not dict:
+            return False
+        fingerprint = runtime_admission_fingerprint(descriptor)
+        if not fingerprint:
+            return False
+        try:
+            budget = float(timeout_seconds)
+            if not isfinite(budget) or budget <= 0:
+                return False
+            # This synchronous admission runs in the original tool callback.
+            # Never nest/block an event loop or leave a detached worker behind.
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                return False
+            return asyncio.run(self._confirm_interaction_delivery_async(
+                interaction_id, fingerprint, min(budget, 3.0)
+            ))
+        except Exception:
+            return False
+
+    async def _confirm_interaction_delivery_async(
+        self, interaction_id: str, fingerprint: str, budget: float
+    ) -> bool:
+        import aiohttp
+
+        path = "/interactions/" + parse.quote(interaction_id, safe="") + "/delivery"
+        url = self.event_url.removesuffix("/events") + path
+
+        async def poll() -> bool:
+            async with aiohttp.ClientSession(trust_env=False) as client:
+                while True:
+                    secret = self._secret_reader()
+                    if type(secret) is not bytes or len(secret) != 32:
+                        return False
+                    headers = sign_sidecar_request(secret, "GET", path, b"")
+                    try:
+                        async with client.get(
+                            url, headers=headers, allow_redirects=False,
+                            timeout=aiohttp.ClientTimeout(total=budget),
+                        ) as response:
+                            raw = bytearray()
+                            async for chunk in response.content.iter_chunked(8192):
+                                raw.extend(chunk)
+                                if len(raw) > MAX_EVENT_RESPONSE_BYTES:
+                                    return False
+                            if 200 <= response.status < 300:
+                                value = json.loads(raw.decode("utf-8"))
+                                if (type(value) is dict and value.get("ok") is True
+                                        and value.get("interaction_id") == interaction_id
+                                        and value.get("runtime_admission_fingerprint") == fingerprint):
+                                    return True
+                    except (aiohttp.ClientError, ValueError):
+                        pass
+                    await asyncio.sleep(0.1)
+        try:
+            return await asyncio.wait_for(poll(), timeout=budget)
+        except asyncio.TimeoutError:
+            return False
 
 
 def _is_bounded_ordinary_json_object(value: object) -> bool:
@@ -288,6 +369,7 @@ class TurnBinding:
     # Display-only outcomes from matched original approval callbacks, never authority.
     _approval_tool_outcomes: dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
     _approval_outcome_overflow: bool = field(default=False, init=False, repr=False, compare=False)
+    metrics: TurnMetrics | None = field(default=None, init=False, repr=False, compare=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
 
     @property
@@ -1144,15 +1226,15 @@ class PluginRuntime:
                 payload["data"]["_hfc_runtime_admission"]["token"] = (
                     self._runtime_interaction_token(state.interaction_key)
                 )
-            result: object = None
-            for attempt in range(2):
-                try:
-                    result = self._post(deepcopy(payload), self._terminal_timeout_seconds)
-                except Exception:
-                    result = None
-                if result is not None or attempt == 1:
-                    break
-            if not self._is_exact_runtime_interaction_admission_response(result):
+            try:
+                result = self._post(deepcopy(payload), self._terminal_timeout_seconds)
+            except Exception:
+                result = None
+            confirmed = self._is_exact_runtime_interaction_admission_response(result)
+            if result is None:
+                confirm = getattr(self._post, "confirm_interaction_delivery", None)
+                confirmed = callable(confirm) and confirm(deepcopy(payload), 3.0) is True
+            if not confirmed:
                 return False
             with self._lock:
                 checked_at = self._now()
@@ -1164,13 +1246,13 @@ class PluginRuntime:
                     or current.pending_handle is not pending_handle
                     or current.resolver is not resolver
                     or current.turn_digest in self._interaction_cleanup_turns
-                    or current.selected_value is not None
-                    or current.resolving_value is not None
                     or current.admission_payload != stored_payload
                     or current.descriptor_expires_at is None
                     or checked_at >= current.descriptor_expires_at
                 ):
                     return False
+                # A real user may resolve the delivered card before its ACK
+                # reaches this caller. That does not revoke delivery ownership.
                 current.hfc_owned = True
                 return True
         except Exception:
@@ -1422,6 +1504,7 @@ class PluginRuntime:
             if admitted:
                 turn = self._registry.claim_unique_session(session_id, turn_id)
                 if turn is not None:
+                    turn.metrics = TurnMetrics(self._now(), model=metric_label(kwargs.get("model")))
                     self._turns[turn_id] = turn
                     self._coordinators[turn_id] = coordinator
                     self._started_transports[turn_id] = started_transport
@@ -1473,6 +1556,19 @@ class PluginRuntime:
                     if self._started_transports.get(turn_id) is started_transport:
                         self._started_transports.pop(turn_id, None)
                 started_transport.completion.set()
+        return None
+
+    def handle_post_api_request(self, **kwargs: object) -> None:
+        turn_id = kwargs.get("turn_id")
+        if not self._exact_nonblank(turn_id) or kwargs.get("platform") != "feishu":
+            return None
+        with self._lock:
+            self._expire_locked(self._now())
+            turn = self._turns.get(turn_id)
+            if (turn is None or not turn.accepts_observer_events or turn.metrics is None
+                    or kwargs.get("session_id") != turn.ingress.session_id):
+                return None
+            turn.metrics.observe_api(kwargs)
         return None
 
     def handle_post_llm_call(self, **kwargs: object) -> None:
@@ -1557,13 +1653,20 @@ class PluginRuntime:
         else:
             sequence = 1
         created_at = self._now()
+        if turn.metrics is not None:
+            try:
+                from .hook_runtime import canonical_turn_context_limit
+                turn.metrics.context_limit = canonical_turn_context_limit(turn_id)
+            except Exception:
+                turn.metrics.context_limit = None
         payload = self._base_payload(turn, sequence=sequence, created_at=created_at)
         payload.update(
             event=f"message.{terminal_kind}",
             event_id=f"turn:{turn_id}:{terminal_kind}",
             phase="terminal",
-            data=self._bound_event_data(turn, (
-                {"answer": answer}
+            data=self._bound_event_data(turn, {
+                **(turn.metrics.payload(created_at) if turn.metrics is not None else {}),
+                **({"answer": answer}
                 if terminal_kind == "completed"
                 else {
                     "error": (
@@ -1573,8 +1676,8 @@ class PluginRuntime:
                     "turn_exit_reason": self._classify_exit_reason(
                         kwargs.get("turn_exit_reason"), interrupted is True
                     ),
-                }
-            )),
+                }),
+            }),
         )
         response = self._post_retry_unknown(
             payload,
@@ -2604,6 +2707,10 @@ def handle_pre_llm_call(**kwargs: Any) -> None:
     return _dispatch("handle_pre_llm_call", **kwargs)
 
 
+def handle_post_api_request(**kwargs: Any) -> None:
+    return _dispatch("handle_post_api_request", **kwargs)
+
+
 def handle_post_llm_call(**kwargs: Any) -> None:
     return _dispatch("handle_post_llm_call", **kwargs)
 
@@ -2647,6 +2754,7 @@ def handle_subagent_stop(**kwargs: Any) -> None:
 HOOK_HANDLERS = {
     "pre_llm_call": "handle_pre_llm_call",
     "post_llm_call": "handle_post_llm_call",
+    "post_api_request": "handle_post_api_request",
     "on_session_end": "handle_on_session_end",
     "on_session_reset": "handle_on_session_reset",
     "on_session_finalize": "handle_on_session_finalize",
