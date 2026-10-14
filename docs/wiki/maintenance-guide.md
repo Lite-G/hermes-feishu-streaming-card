@@ -350,8 +350,13 @@ Hermes 对已启用的插件可只更新 `allow_tool_override: false`，不排�
 
 ## 官方插件的本轮 footer 指标
 
-`post_api_request` 只接收已绑定 turn/session/platform 的归一化 usage、模型名及 request id；不保存原始 response 或 provider URL。每轮最多记录 256 个 request id，重放不重复累计，缺失任一次 usage 或超出上限时省略本轮 token 合计。上下文使用量取最后一次实际 prompt token，容量通过既有 canonical turn carrier 的弱引用读取当前 `context_compressor.context_length`；同线程/task、当前 turn 不匹配或容量未知时不显示虚构的零值。耗时从本轮 pre-LLM 观察开始计算，不把工具等待时间称为模型推理时间。
+`post_api_request` 只接收已绑定 turn/session/platform 的归一化 usage、模型名及 request id；不保存原始 response 或 provider URL。每轮最多记录 256 个 request id，重放不重复累计，缺失任一次 usage 或超出上限时省略本轮 token 合计。上下文使用量只取最新独立请求的实际 prompt token；该请求 usage 缺失时清空旧值，不把上一请求当作最新值。容量通过既有 canonical turn carrier 的弱引用读取当前 `context_compressor.context_length`；同线程/task、当前 turn 不匹配或容量未知时不显示虚构的零值。耗时从本轮 pre-LLM 观察开始计算，不把工具等待时间称为模型推理时间。
 
 新增 publish 参数由官方安装器生成，旧安装只通过已知模板逐字重建验证后 restore，再重新安装；不得手改已安装 Hermes。指标只服务显示，不授予执行或交互所有权。交互卡明确 ACK 后，即使用户已先完成选择，也保留同一 pending identity 的卡片交付所有权，避免再次发送原生问题。
 
 交互卡已明确接管后，原 `wait_for_response` 的异常继续沿 Hermes 调用路径传播，不得被准入的 fail-open 捕获后重发原生题目。未接管或未知接点仍保留原生路径；取消、超时和未知错误不得伪造用户答案。
+
+
+交互送达回执不确定时，只发送一次准入 POST，再通过认证的 `GET /interactions/{id}/delivery` 查询完整身份指纹。这个只读端点不更新等待者心跳或过期状态；不可用通用 result poll 替代。指纹仅在 Feishu 送达且原 reservation commit 成功后写入同一个 InteractionState；新建同 ID 对象不得继承证明，检查点不恢复它。查询响应上限 64 KiB，整次查询最多 3 秒，包含响应头和分块读取；不另建常驻线程或后台重试。没有匹配证明时仍走原生回退。
+
+实际 PluginManager 注册清单必须包含 `post_api_request`，与插件真实注册的完整集合严格相等。安装能力验证不得只检查处理函数存在，或从被测常量生成预期集合而漏掉注册接线。历史恢复只识别已知完整 revision 组合，不能任意混搭旧 publish、clarify 和 terminal 模板。

@@ -53,6 +53,7 @@ Python 3.9 runtime coverage remains separate from this development-tool runtime.
 | Shared display redaction | `display_redaction.py`; no session/render imports; consumers keep their normalization and clipping order |
 | Presentation and payload budgets | `card_view.py`, `content_plan.py`, `render.py`, `presentation.py`, `reading.py`, `render_options.py`, `card_limits.py` |
 | Feishu I/O and CardKit sequencing | `feishu_client.py`, `cardkit.py` |
+| Per-turn display metrics and bounded request deduplication | `turn_metrics.py`; official plugin observations feed display only, canonical carrier borrows the Agent through a weak reference |
 | Pure config values, presets, validation and merge | `config_rules.py`; config/reading/runtime policy consume the same rules without reverse imports |
 | Config, installation and safe recovery | `config.py`, `cli.py`, `install/`; read-only source ownership in `install/decomposed_ownership.py`, family transactions in `install/recovery.py` |
 | Process credentials and service ownership | `process.py`, `runner.py`, `persistent_service.py` |
