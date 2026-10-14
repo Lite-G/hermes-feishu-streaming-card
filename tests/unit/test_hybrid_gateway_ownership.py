@@ -641,7 +641,7 @@ def test_exact_historical_504_install_remains_inspectable_and_restorable(
     assert fresh.status == "installed"
     for fragment in current.fragments:
         assert (root / "gateway/run.py").read_bytes().count(fragment.begin_marker) == 1
-    assert len(current.fragments) == 6
+    assert len(current.fragments) == 7
     assert (
         v3.inspect_fixed_tag_hybrid_install(
             binding=binding, entrypoint=entrypoint, package_version="4.3.0"
@@ -743,3 +743,147 @@ def test_progress_receipt_cannot_cross_route_owner_runtime_or_closed_lifetime(
         runtime.close()
         if replacement is not None:
             replacement.close()
+
+
+@pytest.mark.parametrize(
+    "outcome", ["card", "failed", "unknown", "media", "dropped", "streamed"]
+)
+def test_actual_queued_final_send_uses_receipt_and_preserves_callback(
+    official_gateway_source, monkeypatch, outcome
+):
+    # The clean queued branch is the exact pre-seventh-fragment baseline.
+    source_bytes = (
+        official_gateway_source
+        if os.environ.get("HFC_QUEUED_RED")
+        else _render(official_gateway_source)
+    )
+    tree = ast.parse(source_bytes)
+    gateway = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.ClassDef) and n.name == "GatewayRunner"
+    )
+    method = next(
+        n
+        for n in gateway.body
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_run_agent_inner"
+    )
+    confirmed = next(
+        n
+        for n in ast.walk(method)
+        if isinstance(n, ast.FunctionDef)
+        and n.name == "_stream_confirmed_final_delivery"
+    )
+    confirmed = copy.deepcopy(confirmed)
+    confirmed.returns = None
+    for arg in confirmed.args.args:
+        arg.annotation = None
+    body = next(
+        value
+        for node in ast.walk(method)
+        for value in vars(node).values()
+        if isinstance(value, list)
+        and any(
+            isinstance(n, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "_delivery_result"
+                for t in n.targets
+            )
+            for n in value
+        )
+    )
+    start = next(
+        i
+        for i, n in enumerate(body)
+        if isinstance(n, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == "_delivery_result" for t in n.targets
+        )
+    )
+    end = next(
+        i
+        for i, n in enumerate(body[start:], start)
+        if isinstance(n, ast.If) and "pop_post_delivery_callback" in ast.unparse(n)
+    )
+    selected = copy.deepcopy(body[start : end + 1])
+    wrapped = ast.AsyncFunctionDef(
+        name="queued",
+        args=ast.arguments(
+            posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[]
+        ),
+        body=selected,
+        decorator_list=[],
+    )
+    calls = []
+    callbacks = []
+
+    class Adapter:
+        async def send(self, chat, text, *, metadata):
+            calls.append((chat, text, metadata))
+
+        def pop_post_delivery_callback(self, key, *, generation):
+            assert key == "synthetic-session" and generation == 7
+            return (lambda: callbacks.append("called")) if not callbacks else None
+
+    filters = ModuleType("gateway.response_filters")
+    filters.is_intentional_silence_agent_result = lambda result, text: False
+    monkeypatch.setitem(sys.modules, "gateway.response_filters", filters)
+    text = "SYNTHETIC_FINAL" + (" MEDIA:/synthetic/file" if outcome == "media" else "")
+    receipt = _terminal_record(outcome if outcome in {"failed", "unknown"} else "card")
+    finalized = {"final_response": text, "_hfc_terminal_record": receipt}
+    if outcome == "dropped":
+        finalized.pop("_hfc_terminal_record")
+    raw = {
+        "final_response": "RAW_MUST_NOT_SEND",
+        "_hfc_terminal_record": _terminal_record("card"),
+    }
+    before = finalized.copy()
+    values = dict(
+        response=finalized,
+        result=raw,
+        _sc=SimpleNamespace(final_response_sent=True)
+        if outcome == "streamed"
+        else None,
+        logger=logging.getLogger(__name__),
+        session_key="synthetic-session",
+        run_generation=7,
+        source=SimpleNamespace(chat_id="synthetic-chat"),
+        adapter=Adapter(),
+        _status_thread_metadata={"thread_id": "synthetic-thread"},
+        inspect=inspect,
+    )
+    exec(
+        compile(
+            ast.fix_missing_locations(
+                ast.Module(body=[confirmed, wrapped], type_ignores=[])
+            ),
+            "<actual-queued-Gateway-branch>",
+            "exec",
+        ),
+        values,
+    )
+    asyncio.run(values["queued"]())
+    assert calls == (
+        []
+        if outcome in {"card", "streamed"}
+        else [("synthetic-chat", text, {"thread_id": "synthetic-thread"})]
+    )
+    assert callbacks == ["called"]
+    assert {k: v for k, v in finalized.items() if k != "_hfc_terminal_record"} == {
+        k: v for k, v in before.items() if k != "_hfc_terminal_record"
+    }
+    if not os.environ.get("HFC_QUEUED_RED"):
+        assert "_hfc_terminal_record" not in finalized
+    assert raw["final_response"] == "RAW_MUST_NOT_SEND"
+    # Execute only the original post-delivery pop-and-call a second time.
+    wrapped.body = [copy.deepcopy(body[end])]
+    exec(
+        compile(
+            ast.fix_missing_locations(ast.Module(body=[wrapped], type_ignores=[])),
+            "<actual-queued-callback>",
+            "exec",
+        ),
+        values,
+    )
+    asyncio.run(values["queued"]())
+    assert callbacks == ["called"]
