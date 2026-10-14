@@ -504,12 +504,16 @@ def _installed_patch_registry(installed, backups, patch_groups):
         for source in provenance.sources
         if source.relative_path in HYBRID_PATCH_TARGET_ORDER
     }
-    registries = [HYBRID_PATCH_REGISTRY]
-    for historical_variant in (
-        historical_terminal_registry, historical_publish_registry, historical_clarify_registry,
+    # Only complete revisions that have actually shipped as candidates are
+    # eligible. Never synthesize arbitrary mixtures of historical fragments.
+    pre_metrics = historical_clarify_registry(
+        historical_publish_registry(HYBRID_PATCH_REGISTRY)
+    )
+    for registry in (
+        HYBRID_PATCH_REGISTRY,
+        pre_metrics,
+        historical_terminal_registry(pre_metrics),
     ):
-        registries.extend(historical_variant(registry) for registry in tuple(registries))
-    for registry in registries:
         matrix = registry.target_fragments(patch_groups)
         try:
             rendered = render_patch_snapshots_from_verified_originals(
