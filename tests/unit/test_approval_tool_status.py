@@ -153,6 +153,8 @@ def tool_status(
         chat_id=event.chat_id,
     )
     assert session.apply(event)
+    if payload["data"]["status"] in {"blocked", "timeout", "unverified"}:
+        assert_terminal_tool_render(session, payload, payload["data"]["status"])
     return payload["data"]["status"], session.tools[call].status
 
 
@@ -351,6 +353,30 @@ def test_matched_approval_outcomes_are_bounded_and_follow_turn_cleanup(dispatche
         turn = runtime._turns["synthetic-turn"]
         ref = weakref.ref(turn)
         assert len(turn._approval_tool_outcomes) == 128
+        assert turn._approval_outcome_overflow is True
+        assert tool_status(runtime, posted, dispatcher, "{}", call="call-127") == (
+            "blocked",
+            "blocked",
+        )
+        assert tool_status(runtime, posted, dispatcher, "{}", call="call-128") == (
+            "unverified",
+            "unverified",
+        )
+        assert tool_status(
+            runtime,
+            posted,
+            dispatcher,
+            json.dumps({"writes": 1}),
+            call="new-after-overflow",
+        ) == ("unverified", "unverified")
+        assert tool_status(
+            runtime,
+            posted,
+            dispatcher,
+            "{}",
+            call="explicit-cancel-after-overflow",
+            status="cancelled",
+        ) == ("cancelled", "cancelled")
         assert len(runtime._turns) == 1
         assert len(runtime._pending_approvals) == 0
         del turn, coordinator
@@ -535,6 +561,61 @@ async def test_lost_first_tool_observer_retries_authoritative_status_and_exact_p
         sessions = list(client.app[SESSIONS_KEY].values())
         assert len(sessions) == 1
         assert sessions[0].tools["synthetic-call"].status == expected
+        assert_terminal_tool_render(sessions[0], tool_attempts[-1], expected)
     finally:
         await asyncio.to_thread(runtime.close)
         await client.close()
+
+
+def assert_terminal_tool_render(session, payload, status):
+    from hermes_feishu_card.render import render_card
+
+    expected = {"blocked": "已拒绝", "timeout": "已超时", "unverified": "结果待核对"}[
+        status
+    ]
+    name = payload["data"]["name"]
+    call = payload["data"]["call_id"]
+
+    def strings(value):
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, dict):
+            return [s for v in value.values() for s in strings(v)]
+        if isinstance(value, list):
+            return [s for v in value for s in strings(v)]
+        return []
+
+    def check():
+        for presentation in ("classic", "task"):
+            card = render_card(
+                session, presentation=presentation, timeline_expanded=True
+            )
+            rows = [s for s in strings(card) if name in s]
+            assert rows, (presentation, status, card)
+            assert any(expected in row for row in rows), (presentation, status, rows)
+            assert all(
+                "✓" not in row and "⏳" not in row and "进行中" not in row
+                for row in rows
+            ), (presentation, status, rows)
+
+    check()
+    late = copy.deepcopy(payload)
+    late.update(
+        sequence=payload["sequence"] + 1,
+        event_id="synthetic-late-start",
+        phase="started",
+    )
+    late["data"].update(status="pending")
+    assert session.apply(SidecarEvent.from_dict(late))
+    assert session.tools[call].status == status
+    terminal = copy.deepcopy(payload)
+    terminal.update(
+        event="message.completed",
+        sequence=payload["sequence"] + 2,
+        event_id="synthetic-final",
+        phase="terminal",
+    )
+    terminal["data"] = {"answer": "SYNTHETIC_FINAL_END"}
+    assert session.apply(SidecarEvent.from_dict(terminal))
+    assert session.tools[call].status == status
+    check()
