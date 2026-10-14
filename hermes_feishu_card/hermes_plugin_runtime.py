@@ -39,6 +39,7 @@ OFFICIAL_HOOKS = (
 
 DEFAULT_EVENT_URL = "http://127.0.0.1:8765/events"
 DEFAULT_EVENT_TIMEOUT_SECONDS = 0.8
+DEFAULT_TERMINAL_TIMEOUT_SECONDS = 10.0
 MAX_EVENT_REQUEST_BYTES = 256 * 1024
 MAX_EVENT_RESPONSE_BYTES = 64 * 1024
 MAX_EVENT_JSON_DEPTH = 16
@@ -107,7 +108,15 @@ class SignedEventTransport:
             requested_timeout = float(timeout_seconds)
             if not isfinite(requested_timeout) or requested_timeout <= 0:
                 return None
-            timeout = min(requested_timeout, self._timeout_seconds)
+            # Final delivery waits for the card PATCH acknowledgement. Honor
+            # the runtime's bounded terminal budget instead of silently
+            # shortening it to the observer budget.
+            timeout_cap = (
+                DEFAULT_TERMINAL_TIMEOUT_SECONDS
+                if payload.get("event") in ("message.completed", "message.failed")
+                else self._timeout_seconds
+            )
+            timeout = min(requested_timeout, timeout_cap)
             headers = {"Content-Type": "application/json"}
             headers.update(sign_event_request(secret, body))
             req = request.Request(
@@ -539,7 +548,7 @@ class PluginRuntime:
         post: Callable[[dict[str, object], float], object],
         now: Callable[[], float] = time,
         observer_timeout_seconds: float = 0.8,
-        terminal_timeout_seconds: float = 10.0,
+        terminal_timeout_seconds: float = DEFAULT_TERMINAL_TIMEOUT_SECONDS,
         max_pending_observers: int = 64,
     ) -> None:
         if not callable(post) or not callable(now):
