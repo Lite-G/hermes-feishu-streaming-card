@@ -182,3 +182,66 @@ def test_visual_docs_require_cross_card_and_denial_semantics():
     text = (Path(__file__).resolve().parents[2] / 'docs/wiki/card-visual-guidelines.md').read_text()
     for requirement in ('跨卡检查', '旧段、交互回执与最终回复', '明确标识并默认收起', '已拒绝的工具不能显示成功对勾'):
         assert requirement in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('receipt_confirmed', [True, False])
+async def test_collapsed_receipt_scope_prunes_only_after_full_receipt_confirmation(
+        handoff, monkeypatch, receipt_confirmed):
+    from hermes_feishu_card.session import InteractionState
+    app, owner = handoff
+    owner.status = 'completed'
+    owner.active_interaction = InteractionState(
+        'approval_fixture', 'approval', 'FULL_AUTHORIZATION_SCOPE',
+        status='completed', choice='deny', choice_label='拒绝',
+        feishu_message_id='independent_receipt', callback_token='synthetic_old_token')
+    app[server.SESSIONS_KEY]['fixture'] = owner
+    app[server.FEISHU_MESSAGE_IDS_KEY]['fixture'] = 'new_confirmed'
+    card = {'schema': '2.0', 'body': {'elements': [{
+        'tag': 'collapsible_panel', 'element_id': 'previous_content', 'expanded': False,
+        'elements': [
+            {'tag': 'markdown', 'element_id': 'main_content', 'content': 'FULL_HISTORY_END'},
+            {'tag': 'markdown', 'element_id': 'interaction_review_scope', 'content': 'FULL_AUTHORIZATION_SCOPE'},
+            {'tag': 'markdown', 'element_id': 'interaction_result', 'content': 'DECISION_DENIED'},
+        ]}]}}
+    monkeypatch.setattr(server, '_render_static_display_card', lambda *a, **k: copy.deepcopy(card))
+    monkeypatch.setattr(server, '_interaction_mode_for_session_key', lambda *a: 'callback')
+    full_receipt = {'schema': '2.0', 'body': {'elements': [
+        {'tag': 'markdown', 'content': 'FULL_AUTHORIZATION_SCOPE DECISION_DENIED'}]}}
+    monkeypatch.setattr(server, '_render_interaction_callback_card_for_app', lambda *a, **k: copy.deepcopy(full_receipt))
+    updates = []
+    async def update(app, mid, payload, bot_id, **kwargs):
+        updates.append((mid, copy.deepcopy(payload)))
+        return receipt_confirmed if mid == 'independent_receipt' else True
+    monkeypatch.setattr(server, '_update_card_for_app', update)
+    retire = server._retire_continuation_predecessor
+    if os.environ.get('HFC_RECEIPT_BASELINE') == '35bb47f':
+        raw = subprocess.check_output(['git', 'show', '35bb47f:hermes_feishu_card/server.py'], text=True)
+        node = next(n for n in ast.parse(raw).body if isinstance(n, ast.AsyncFunctionDef)
+                    and n.name == '_retire_continuation_predecessor')
+        unit = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), node], type_ignores=[])
+        namespace = dict(vars(server))
+        exec(compile(ast.fix_missing_locations(unit), 'git-35bb47f-retire.py', 'exec'), namespace)
+        retire = namespace['_retire_continuation_predecessor']
+    assert await retire(app, 'fixture', 'old_preserved', copy.deepcopy(owner), bot_id=None)
+    assert 'FULL_AUTHORIZATION_SCOPE' in str(updates[0][1])
+    assert 'DECISION_DENIED' in str(updates[0][1])
+    assert len(owner.approval_retirements) == 1
+    pending = owner.approval_retirements[0]
+    assert pending['interaction'].callback_token == ''
+    assert 'FULL_HISTORY_END' in str(pending['card'])
+    assert 'FULL_AUTHORIZATION_SCOPE' not in str(pending['card'])
+    assert len(updates) == 1, 'not pruned on registration before receipt ACK'
+    await server._settle_approval_displays(app, 'fixture', owner)
+    assert updates[1][0] == 'independent_receipt'
+    assert 'FULL_AUTHORIZATION_SCOPE' in str(updates[1][1])
+    if receipt_confirmed:
+        assert len(updates) == 3 and updates[2][0] == 'old_preserved'
+        assert 'FULL_HISTORY_END' in str(updates[2][1])
+        assert 'FULL_AUTHORIZATION_SCOPE' not in str(updates[2][1])
+        assert 'DECISION_DENIED' not in str(updates[2][1])
+        assert owner.approval_retirements == []
+    else:
+        assert len(updates) == 2
+        assert len(owner.approval_retirements) == 1
+        assert 'FULL_AUTHORIZATION_SCOPE' in str(updates[0][1])
