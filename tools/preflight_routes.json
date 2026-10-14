@@ -577,6 +577,12 @@
       "install_transactions",
       "diagnostics",
       "upstream"
+    ],
+    "hermes_feishu_card/existing_owner_projection.py": [
+      "appearance",
+      "delivery",
+      "storage",
+      "interaction"
     ]
   }
 }

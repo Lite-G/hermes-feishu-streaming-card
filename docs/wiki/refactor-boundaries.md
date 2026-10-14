@@ -102,3 +102,10 @@ Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序�
 `decomposed` 仅直接重导出既有名称，供已有安装测试与导入消费者兼容；产品内部直接调用 ownership 或 recovery。后续确认支持周期内无旧导入消费者后才能清退，不能恢复一份 wrapper 算法。故障注入应指向 `decomposed_ownership.render` 与 `git_evidence._run_git`，物理 I/O 与 Recovery 的原 fault seams 不迁移。源码、普通 wheel、实际安装恢复和平台验证分别登记，不由结构说明推定通过。
 
 安装包入口保留原 `__all__`，通过按需解析返回原实现对象；导入只读叶模块不再预先加载 detect/recovery。包级名称、对象身份和 `dir` 可发现性保持，未知名称仍抛 AttributeError。
+
+
+## 既有 legacy owner 的展示组合
+
+`existing_owner_projection.project_existing_owner` 持有完整方言与容量选择：普通卡原样返回、优先保留安全的实时输入卡、使用原正文投影拼接 legacy 回执、超限时保留完整原回执并返回 native/deferred-native 结果。原始超限 inspection 与原因继续随结果返回，不把安全占位卡冒称完整答案已送达。
+
+server 只适配本轮真实 owner message、session 与配置。实时卡和标题按原分支惰性获取；无 legacy/schema2 组合时不读取两者，安全实时卡不查询 fallback 标题。projection 不持有 app/session/注册表，不执行 I/O、确认授权或提交 owner 变更；原锁、投递与检查点顺序保留。未知或旧交互不能由静态回执恢复执行。

@@ -109,6 +109,7 @@ from .interaction_rules import (
 from .interaction_resolver import resolve_interaction
 from .interaction_receipts import build_auxiliary_receipt
 from .owner_display_policy import OwnerRefreshState
+from .existing_owner_projection import project_existing_owner
 from .message_navigation import MessageNavigation, with_continuation_navigation
 from .notice_lifecycle import NoticeScope, RestartNoticeRegistry
 from .native_admission import (
@@ -141,7 +142,6 @@ from .render import (
     _format_duration,
     _is_initial_loading,
     _primary_text_for_session,
-    _render_limit_handoff_card,
     render_card_result,
     render_legacy_interaction_callback_card,
     render_terminal_limit_handoff_card,
@@ -150,7 +150,7 @@ from .process import state_dir
 from .session import CardSession
 from .approval_receipts import approval_receipt_fingerprint
 from .display_segments import display_view, needs_continuation
-from .legacy_owner import (auxiliary_receipt_card, legacy_owner_body,
+from .legacy_owner import (auxiliary_receipt_card,
                            static_legacy_receipt)
 from .status import StatusConfig
 from .subscription_usage import fetch_codex_subscription_usage, uses_codex_subscription
@@ -6750,36 +6750,29 @@ def _remember_legacy_owner_receipt(app, session_key):
 
 
 def _existing_owner_render_result(app, session, result, *, session_key=None):
-    if not session.legacy_owner_receipt or result.card.get("schema") != "2.0":
-        return result
-    resolved_key = session_key or _session_key_for_session(app, session)
-    interaction = session.active_interaction
-    if (session.status not in {"completed", "failed"}
-            and interaction is not None and interaction.status in {"pending", "paused"}
-            and interaction.feishu_message_id
-            and interaction.feishu_message_id == app[FEISHU_MESSAGE_IDS_KEY].get(resolved_key)):
-        # A live first-message interaction owns this legacy card. Its private
-        # checkpoint is deliberately static, but must never replace live input
-        # controls. Restored sessions have no InteractionState or old token.
-        live_card = _render_interaction_callback_card_for_app(app, session, session_key=resolved_key)
-        inspection = inspect_card_limits(live_card)
-        if inspection.safe:
-            return replace(result, card=live_card, disposition="card", inspection=inspection, limit_reason="")
-    _, _, title, _ = _session_card_render_context(app, session, session_key=session_key)
-    primary = result.primary_text if result.disposition == "card" else None
-    card = legacy_owner_body(session.legacy_owner_receipt, result.card, primary)
-    inspection = inspect_card_limits(card)
-    if inspection.safe:
-        return replace(result, card=card, inspection=inspection)
-    terminal = session.status in {"completed", "failed"}
-    placeholder = _render_limit_handoff_card(title=title, terminal=terminal)
-    bounded = legacy_owner_body(session.legacy_owner_receipt, placeholder)
-    if not inspect_card_limits(bounded).safe:
-        # The original receipt already passed the shared limit. Preserve it
-        # unchanged instead of trimming the question or accepted decision.
-        bounded = copy.deepcopy(session.legacy_owner_receipt)
-    return replace(result, card=bounded, disposition="native" if terminal else "deferred_native",
-                   inspection=inspection, limit_reason=inspection.primary_reason)
+    def live_card():
+        resolved_key = session_key or _session_key_for_session(app, session)
+        interaction = session.active_interaction
+        if (session.status not in {"completed", "failed"}
+                and interaction is not None and interaction.status in {"pending", "paused"}
+                and interaction.feishu_message_id
+                and interaction.feishu_message_id == app[FEISHU_MESSAGE_IDS_KEY].get(resolved_key)):
+            # The real first-message owner retains its live controls. A restored
+            # session has no InteractionState or old callback token.
+            return _render_interaction_callback_card_for_app(app, session, session_key=resolved_key)
+        return None
+
+    def title():
+        _, _, value, _ = _session_card_render_context(app, session, session_key=session_key)
+        return value
+
+    return project_existing_owner(
+        result,
+        receipt=session.legacy_owner_receipt,
+        terminal=session.status in {"completed", "failed"},
+        live_card=live_card,
+        title=title,
+    )
 
 
 def _render_session_card_result_for_app(
