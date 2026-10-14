@@ -2351,7 +2351,7 @@ def _render_timeline_elements(
     return reasoning_elements
 
 
-_TIMELINE_PANEL_TITLE = "▸ 思考过程（点开查看）"
+_TIMELINE_PANEL_TITLE = "思考过程（点按展开/收起）"
 
 
 def _timeline_panel(
@@ -2360,15 +2360,12 @@ def _timeline_panel(
     *,
     expanded: bool,
 ) -> Dict[str, Any]:
-    """The collapsible 思考过程 panel. Its header must LOOK tappable.
+    """Keep the toggle discoverable without claiming a stale client state.
 
-    Maintainer note (contract change): the header used to read just "思考过程" — plain prose with
-    no affordance at all, so the user reported they could not tell the panel opens
-    ("思考过程这几个字目前看不出来 可以点开折叠"). The title now carries a leading triangle and an
-    explicit hint. Deliberately text-only: Feishu rejects a standalone text_tag element
-    (230099/200621) and no collapsible_panel header in this codebase has ever sent an `icon`, so a
-    new element type would be unverified against the live API — a plain_string hint cannot break
-    the card.
+    Feishu toggles the panel locally without rewriting this plain-text header.
+    A fixed directional triangle or open-only hint becomes incorrect after a
+    toggle, including when the task preset starts expanded. Preserve a neutral
+    hint in both states and the existing supported text-only header schema.
     """
     return {
         "tag": "collapsible_panel",
