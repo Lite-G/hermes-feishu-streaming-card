@@ -855,8 +855,9 @@ def test_task4_post_llm_is_cache_only_and_failed_end_ignores_nonempty_explanatio
     assert posted[0]["data"] == {
         "error": "消息处理失败",
         "turn_exit_reason": "runtime_error",
-    }
-    assert "FAILURE-EXPLANATION-CANARY" not in repr(posted)
+        "profile_id": "default",
+        "profile_source": "fallback_default",
+    }"FAILURE-EXPLANATION-CANARY" not in repr(posted)
     assert "PRIVATE-TRACE-CANARY" not in repr(posted)
 
 
@@ -910,7 +911,11 @@ def test_task4_only_literal_success_flags_with_exact_cached_answer_complete():
             "event_id": "turn:turn-1:completed",
             "producer": "plugin",
             "phase": "terminal",
-            "data": {"answer": answer},
+            "data": {
+                "answer": answer,
+                "profile_id": "default",
+                "profile_source": "fallback_default",
+            },
         }
     ]
     assert runtime.take_terminal_disposition("turn-1") == {
@@ -979,13 +984,22 @@ def test_task4_official_tool_kwargs_drop_every_raw_canary_and_map_statuses():
     runtime.drain_observers(1.0)
 
     assert [payload["data"] for payload in posted] == [
-        {"tool_id": "call-1", "call_id": "call-1", "name": "shell", "status": "pending"},
+        {
+            "tool_id": "call-1",
+            "call_id": "call-1",
+            "name": "shell",
+            "status": "pending",
+            "profile_id": "default",
+            "profile_source": "fallback_default",
+        },
         {
             "tool_id": "call-1",
             "call_id": "call-1",
             "name": "shell",
             "status": "failed",
             "duration_ms": 9,
+            "profile_id": "default",
+            "profile_source": "fallback_default",
         },
     ]
     serialized = repr(posted)
@@ -1815,7 +1829,11 @@ def test_task4_terminal_record_is_deep_copied_one_shot_and_concurrent_take_once(
         records = list(executor.map(lambda _: (barrier.wait(), runtime.take_terminal_record("turn-1"))[1], range(2)))
     assert sum(record is not None for record in records) == 1
     record = next(record for record in records if record is not None)
-    assert record["payload"]["data"] == {"answer": "answer"}
+    assert record["payload"]["data"] == {
+        "answer": "answer",
+        "profile_id": "default",
+        "profile_source": "fallback_default",
+    }
     record["payload"]["data"]["answer"] = "mutated"
     assert runtime.take_terminal_record("turn-1") is None
     assert runtime.take_terminal_disposition("turn-1") is None
@@ -2069,8 +2087,13 @@ def test_task6_patch_delta_uses_shared_sequence_and_exact_patch_payload(monkeypa
             "created_at": 100.0,
             "event_id": "patch:turn-1:answer.delta:1",
             "producer": "patch",
-            "phase": "delta",
-            "data": {"text": "answer text", "mode": "delta"},
+            "phase": "update",
+            "data": {
+                "text": "answer text",
+                "mode": "delta",
+                "profile_id": "default",
+                "profile_source": "fallback_default",
+            },
         },
         {
             "schema_version": "1",
@@ -2085,8 +2108,13 @@ def test_task6_patch_delta_uses_shared_sequence_and_exact_patch_payload(monkeypa
             "created_at": 100.0,
             "event_id": "patch:turn-1:thinking.delta:2",
             "producer": "patch",
-            "phase": "delta",
-            "data": {"text": "thinking text", "mode": "append_block"},
+            "phase": "update",
+            "data": {
+                "text": "thinking text",
+                "mode": "append_block",
+                "profile_id": "default",
+                "profile_source": "fallback_default",
+            },
         },
     ]
 
@@ -2101,7 +2129,12 @@ def test_task6_patch_delta_accepts_exact_64_kib_utf8_boundary():
         "turn-1", "answer.delta", text, "delta"
     ) is True
     runtime.drain_observers(1.0)
-    assert posted[0]["data"] == {"text": text, "mode": "delta"}
+    assert posted[0]["data"] == {
+        "text": text,
+        "mode": "delta",
+        "profile_id": "default",
+        "profile_source": "fallback_default",
+    }
 
 
 @pytest.mark.parametrize(
@@ -2253,10 +2286,9 @@ def test_patch_status_notice_uses_shared_sequence_and_exact_sanitized_payload(
                 "content": "正在总结较早的对话，完成后会继续当前任务。",
                 "create_session": True,
                 "display_status": "in_progress",
-            },
-        }
-    ]
-    assert "session-1" not in repr(posted[0]["data"])
+                "profile_id": "default",
+                "profile_source": "fallback_default",
+            }ted[0]["data"])
     assert "gateway-session-1" not in repr(posted[0]["data"])
     assert "oc_1" not in repr(posted[0]["data"])
 
