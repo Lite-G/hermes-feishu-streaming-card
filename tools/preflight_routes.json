@@ -145,6 +145,7 @@
       "tests/unit/test_hermes_plugin.py",
       "tests/unit/test_hermes_plugin_runtime.py",
       "tests/unit/test_plugin_profile_routing.py",
+      "tests/unit/test_hybrid_gateway_ownership.py",
       "tests/unit/test_install_plugin.py",
       "tests/unit/test_native_hook_capabilities.py",
       "tests/unit/test_native_probe_diagnostics.py"
@@ -195,6 +196,7 @@
       "tests/integration/test_cli_install.py",
       "tests/unit/test_decomposed_patcher.py",
       "tests/unit/test_install_v3_transaction.py",
+      "tests/unit/test_hybrid_gateway_ownership.py",
       "tests/unit/test_bound_recovery_io.py",
       "tests/unit/test_recovery.py"
     ],
