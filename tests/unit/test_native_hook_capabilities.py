@@ -320,6 +320,7 @@ def _run_installed_probe(
     *,
     swap_runtime_after_binding: bool = False,
     rebind_descriptor_paths_during_fork: bool = False,
+    omit_post_api_evidence: bool = False,
 ) -> dict[str, object]:
     parent_cache = Path(tempfile.mkdtemp(
         prefix="parent-pycache-", dir=runtime.parents[2]
@@ -360,16 +361,25 @@ def _run_with_rebound_descriptor_paths(**kwargs):
         home_held.rename(home)
 native_hooks._run_forked_plugin_probe = _run_with_rebound_descriptor_paths
 ''' if rebind_descriptor_paths_during_fork else ""
+    evidence_fault = "True" if omit_post_api_evidence else "False"
     code = '''
 import json
 from hermes_feishu_card.install import native_hooks
 _captured_probe_payload = {}
+_observed_registered_hooks = []
 _real_validate_payload = native_hooks._validate_plugin_manager_payload
 def _capture_probe_payload(payload, **kwargs):
+    _observed_registered_hooks[:] = payload["registered_hooks"]
+    if OMIT_POST_API_EVIDENCE:
+        payload = dict(payload)
+        payload["registered_hooks"] = [name for name in payload["registered_hooks"] if name != "post_api_request"]
+        unsigned = dict(payload)
+        del unsigned["attestation_sha256"]
+        payload["attestation_sha256"] = native_hooks._sha256(json.dumps(unsigned, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii"))
     _captured_probe_payload.update(payload)
     return _real_validate_payload(payload, **kwargs)
 native_hooks._validate_plugin_manager_payload = _capture_probe_payload
-''' + swap_setup + descriptor_setup + '''
+'''.replace("OMIT_POST_API_EVIDENCE", evidence_fault) + swap_setup + descriptor_setup + '''
 try:
     result = native_hooks.probe_native_hook_capabilities(
         __import__("sys").argv[1],
@@ -395,6 +405,8 @@ print(json.dumps({
     "pycache_prefix": _captured_probe_payload.get("pycache_prefix", ""),
     "child_sys_path": _captured_probe_payload.get("child_sys_path", []),
     "loaded_modules": _captured_probe_payload.get("loaded_modules", []),
+    "observed_registered_hooks": _observed_registered_hooks,
+    "reported_registered_hooks": _captured_probe_payload.get("registered_hooks", []),
 }, sort_keys=True, separators=(",", ":")))
 '''
     completed = subprocess.run(
@@ -1177,3 +1189,26 @@ def test_installed_probe_success_keeps_payload_without_raw_stderr(tmp_path, monk
     result = _run_installed_probe(tmp_path / "runtime/bin/python", tmp_path)
 
     assert result == {**payload, "source_probe_failures": []}
+
+
+def test_real_plugin_manager_registration_includes_official_api_observer(installed_fixed_runtime):
+    result = _run_installed_probe(installed_fixed_runtime, FIXED_SOURCE_ROOT)
+    assert result["observed_registered_hooks"] == sorted({
+        "pre_llm_call", "post_llm_call", "post_api_request", "on_session_end",
+        "on_session_reset", "on_session_finalize", "pre_tool_call", "post_tool_call",
+        "pre_approval_request", "post_approval_response", "subagent_start", "subagent_stop",
+    })
+    assert result["reason_code"] == "verified"
+    assert set(result["available"]) == {
+        "turn_start", "turn_terminal_result", "stable_tool_lifecycle", "approval_observe",
+    }
+
+
+def test_real_manager_evidence_missing_api_observer_remains_rejected(installed_fixed_runtime):
+    result = _run_installed_probe(
+        installed_fixed_runtime, FIXED_SOURCE_ROOT, omit_post_api_evidence=True,
+    )
+    assert "post_api_request" in result["observed_registered_hooks"]
+    assert "post_api_request" not in result["reported_registered_hooks"]
+    assert result["reason_code"] == "registration_incomplete"
+    assert result["available"] == []
