@@ -33,7 +33,7 @@
 - `message.started` 必须从真实入站 `event.message_id` 绑定 `turn_id`；同一 `source` 的 stream/tool/terminal 回调复用这个 immutable identity。显式 `turn_id` 是 canonical turn hard fence，不能被 `message_id` 或 `reply_to_message_id` alias 覆盖；无法在 `source` 绑定私有属性时保持 legacy fail-open。
 - 官方 PluginRuntime 的所有事件还必须保留同一 ingress 的 `profile_id` / `profile_source`，包括 patch delta、状态提示、交互准入、工具观察和结束事件。事件 data 由统一身份绑定函数构造，调用方数据不得覆盖已验证的 profile；不能只在 started 写入身份，否则后续事件会创建另一份 session，留下未收尾卡片。
 - patch delta 使用协议支持的 `phase=update`。最终 `message.completed` / `message.failed` 的 HTTP 确认沿用运行时的 10 秒上限，并受调用者更短预算约束；不能再被普通 observer 超时截短。其他事件保留原 observer 上限，未知结果仍不冒充成功。
-- Hybrid 最终投递回执必须穿过 `TurnRunner.run_sync` 的正常与空响应结果重组分支，再由外层 Gateway 一次性消费；只验证 finalizer 和消费 helper 不足以证明真实链路。回归应执行固定上游源码的两个原始 Return AST，核对除私有回执外所有原字段保持一致。响应含 `MEDIA:` 附件标签、Gateway 后续追加附件或改写响应时，保留原生投递，不能让早期卡片回执吞掉新增内容。
+- Hybrid 最终投递回执必须穿过 `TurnRunner.run_sync` 的正常与空响应结果重组分支，再由外层 Gateway 一次性消费；只验证 finalizer 和消费 helper 不足以证明真实链路。回归应执行固定上游源码的两个原始 Return AST，核对除私有回执外所有原字段保持一致。排队续问在递归前直接投递上一轮结果，必须在该实际出口独立消费同一回执并保留正文、历史与后续回调。响应含 `MEDIA:` 附件标签、Gateway 后续追加附件或改写响应时，保留原生投递，不能让早期卡片回执吞掉新增内容。
 - Hybrid 原生工具提示在 callback 入队前和 sender 每次出队后检查当前卡片所有权，保留独立日志。只有同一 canonical turn、profile、chat/thread、Gateway session 与 generation 的 `CARD_ACTIVE` 才抑制；未知、未接管、其他平台及异常继续原生路径。后台 sender 启动早于接管，不能仅在方法入口检查一次。接受证明仅存于同一个 `TurnContext`，绑定同一 runtime 和完整路由，终结后用于丢弃该上下文的进度尾队列；换轮次、换 runtime 或 runtime 关闭不得复用。取消任务时也检查该证明，避免最后一次队列清空或编辑重新产生原生提示。
 - stable tool lifecycle 与 legacy progress callback 不能同时投递同一调用；wrapper 检测必须读取 agent 当前实际 callback，显式 fallback 标记仅用于卡片路径未接受时恢复原生进度。
 - 已识别 `system.notice` 必须按 sidecar 结果分流：已有卡片异步更新的 `accepted` 与独立卡首次投递的 `delivered` 抑制原生文本，`not_sent` 回退原始通知文本，`unknown` 只尝试固定通用提示且不重复原始通知文本；`accepted` 必须同时带有 `applied=true`，不可解析响应一律视为 `unknown`。

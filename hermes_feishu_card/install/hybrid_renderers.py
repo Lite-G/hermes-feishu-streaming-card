@@ -276,7 +276,7 @@ def _render_terminal_gateway(content: bytes, descriptor: PatchGroupDescriptor) -
          )),
         key=lambda node: node.lineno,
     )
-    if len(returns) != 2 or len(descriptor.fragments) != 6:
+    if len(returns) != 2 or len(descriptor.fragments) != 7:
         raise ValueError("fixed-tag terminal result projection changed")
     lines = text.splitlines(keepends=True)
     for node, fragment in reversed(list(zip(returns, descriptor.fragments[1:3]))):
@@ -331,7 +331,21 @@ def _render_terminal_gateway(content: bytes, descriptor: PatchGroupDescriptor) -
         rendered = _insert_in_function(rendered, function_name=function,
                                       anchor=anchor, block=block, before=before,
                                       anchor_indent=anchor_indent)
-    return rendered
+    queued_block = _marker_block(descriptor.fragments[6], "                    ", (
+        "try:",
+        "    from hermes_feishu_card.hook_runtime import apply_hybrid_terminal_record as _hfc_apply_terminal",
+        '    _hfc_record = _delivery_result.pop("_hfc_terminal_record", None)',
+        '    if first_response == _delivery_result.get("final_response") and "MEDIA:" not in first_response:',
+        '        if _hfc_apply_terminal(_hfc_record) == "card":',
+        '            _already_streamed = True',
+        "except Exception:",
+        "    pass",
+    ), newline)
+    return _insert_in_function(
+        rendered, function_name="_run_agent_inner",
+        anchor="# Apply the same predicate as the normal completed-turn path.",
+        block=queued_block, before=True, anchor_indent="                    ",
+    )
 
 
 def _render_answer_delta(content: bytes, descriptor: PatchGroupDescriptor) -> bytes:

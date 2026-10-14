@@ -764,6 +764,7 @@ HYBRID_PATCH_DESCRIPTORS = (
         "terminal_disposition", "gateway/run.py", "terminal_consume",
         "terminal_carrier_empty", "terminal_carrier_normal",
         "native_progress_enqueue", "native_progress_send", "native_progress_cancel",
+        "queued_terminal_consume",
     ),
     _structural_descriptor("answer_delta", "gateway/run.py", "answer_delta"),
     _structural_descriptor("thinking_delta", "gateway/run.py", "thinking_delta"),
