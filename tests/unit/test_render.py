@@ -75,7 +75,7 @@ def test_render_thinking_card_keeps_runtime_status_only_in_footer():
 
 @pytest.mark.parametrize(
     ("provider", "model", "expected"),
-    [("fallback", "model-1", "fallback/model-1"), ("fallback", "fallback/model-1", "fallback/model-1"), ("fallback", "", "Unknown"), ("", "model-1", "model-1"), ("<unsafe>", "model-1", "&lt;unsafe&gt;/model-1")],
+    [("fallback", "model-1", "fallback/model-1"), ("fallback", "fallback/model-1", "fallback/model-1"), ("fallback", "", None), ("", "model-1", "model-1"), ("<unsafe>", "model-1", "&lt;unsafe&gt;/model-1")],
 )
 def test_footer_uses_reported_provider_without_duplicate_prefix(provider, model, expected):
     session = CardSession(conversation_id="chat-1", message_id="msg-1", chat_id="oc_abc")
@@ -88,7 +88,12 @@ def test_footer_uses_reported_provider_without_duplicate_prefix(provider, model,
     session.model = model
     card = render_card(session, footer_fields=["model"])
     footer = next(item for item in card["body"]["elements"] if item.get("element_id") == "footer")
-    assert expected in footer["content"]
+    if expected is None:
+        assert "Unknown" not in footer["content"]
+        assert "fallback" not in footer["content"]
+        assert "已完成" in footer["content"]
+    else:
+        assert expected in footer["content"]
     assert "fallback/fallback/" not in footer["content"]
     assert "<unsafe>" not in footer["content"]
 
