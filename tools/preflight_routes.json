@@ -22,7 +22,8 @@
     "config": [
       "tests/unit/test_config.py",
       "tests/unit/test_package_metadata.py",
-      "tests/unit/test_minimal_reading_config.py"
+      "tests/unit/test_minimal_reading_config.py",
+      "tests/unit/test_config_rules.py"
     ],
     "install": [
       "tests/unit/test_patcher.py",
@@ -60,7 +61,8 @@
       "tests/integration/test_reading_presets_http.py",
       "tests/integration/test_combined_stability.py",
       "tests/unit/test_message_navigation.py",
-      "tests/unit/test_display_redaction.py"
+      "tests/unit/test_display_redaction.py",
+      "tests/unit/test_config_rules.py"
     ],
     "quota": [
       "tests/unit/test_subscription_usage.py",
@@ -165,7 +167,8 @@
       "tests/unit/test_bots.py",
       "tests/unit/test_profile_sources.py",
       "tests/unit/test_multiplex_adapters.py",
-      "tests/integration/test_multiplex_zero_events.py"
+      "tests/integration/test_multiplex_zero_events.py",
+      "tests/unit/test_config_rules.py"
     ],
     "sdk": [
       "tests/unit/test_cold_start_card_callbacks.py",
