@@ -7,7 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .reading import READING_FIELDS, explain_reading_config
+from .reading import explain_reading_config
+from .config_rules import READING_FIELDS
 
 CONTROL_CARD_CONFIG_PATH = "/control/card-config"
 SNAPSHOT_SCHEMA = "hfc-card-config-v1"
@@ -63,7 +64,7 @@ def _effective_mode(value: Any) -> str:
 
 def validated_reading_values(value: object) -> dict[str, Any] | None:
     """Reuse runtime normalization and the explanation allowlist for responses."""
-    from .config import _normalize_card_config
+    from .config_rules import normalize_card_config
 
     if not isinstance(value, dict) or set(value) != {*READING_FIELDS, "terminal_tool_activity", "presentation"}:
         return None
@@ -73,7 +74,7 @@ def validated_reading_values(value: object) -> dict[str, Any] | None:
         return None
     try:
         card = copy.deepcopy({field: value[field] for field in READING_FIELDS})
-        _normalize_card_config(card, path="card")
+        normalize_card_config(card, path="card")
         projected = explain_reading_config({"card": card})["values"]
     except (TypeError, ValueError, OverflowError):
         return None

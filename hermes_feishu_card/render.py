@@ -16,7 +16,7 @@ from .display_redaction import (
 from .card_limits import CardLimitInspection, inspect_card_limits
 from .card_timeline import TERMINAL_TOOL_STATUSES
 from .approval_receipts import has_confirmed_approval_receipt
-from .config import card_width_config
+from .config_rules import card_width_config
 from .session import (
     CardSession,
     ToolState,

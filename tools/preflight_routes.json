@@ -215,6 +215,11 @@
     "hermes_feishu_card/cli.py": [
       "cli"
     ],
+    "hermes_feishu_card/config_rules.py": [
+      "config",
+      "appearance",
+      "routing"
+    ],
     "hermes_feishu_card/config.py": [
       "config"
     ],

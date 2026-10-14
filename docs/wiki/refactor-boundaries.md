@@ -17,6 +17,7 @@
 | 命令卡纯构造 | `command_cards` | hook_runtime 保留 producer、callback 注册、adapter identity 与命令执行 |
 | turn-local observer 序号、terminal barrier 和有界 worker | `turn_events` | PluginRuntime 保留 producer 归属、registry/map 与锁顺序；允许的 producer 名称不是排他所有权证明 |
 | 只读 CLI 格式化与本地诊断导出 | `cli_reports`、`support_report` | CLI 执行诊断并决定退出码；报告默认不上传 |
+| 配置默认值、阅读预设、卡片合并/规范化与精确原生聊天校验 | `config_rules` | config 只加载文件/环境并调用规则；reading 只解释来源；delivery_policy 保留运行时加载/缓存。所有者不导入这三个消费者；旧公开值/函数入口以同对象重导出保留，内部调用直接导入规则 |
 | 已加载阅读默认值与下次加载比较 | `config_snapshot` | process 验证现有受管进程，server 只读取 factory 已加载值 |
 | 解释器路径身份 | `runtime_ownership.python_executable_identity` | server、CLI、runner、maintenance 共用同一算法 |
 | Gateway stale-result 来源契约 | `install/gateway_contracts` | patcher 保留 handler 发现、marker 校验/移除与 owned-block render/apply；契约只返回已验证位置，未知绑定按原错误拒绝 |

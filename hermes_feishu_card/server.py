@@ -24,13 +24,10 @@ from aiohttp import web
 from .runtime_ownership import runtime_target_identity, python_executable_identity
 from .bots import RouteResult
 from .card_limits import inspect_card_limits
-from .config import (
-    card_width_config,
-    card_completion_mention_enabled,
-    card_interaction_mention_enabled,
-    load_config,
-    merge_card_config,
-    resolve_operations_hermes_root,
+from .config import load_config, resolve_operations_hermes_root
+from .config_rules import (
+    card_width_config, card_completion_mention_enabled,
+    card_interaction_mention_enabled, merge_card_config,
 )
 from .delivery import CardDeliveryResult
 from .config_snapshot import (
