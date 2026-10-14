@@ -534,9 +534,9 @@ async def test_actual_native_progress_suppresses_only_card_active(
         runtime.close()
 
 
-@pytest.mark.parametrize("action", ["inspect", "restore"])
+@pytest.mark.parametrize("historical_revision", ["504", "cd86"])
 def test_exact_historical_504_install_remains_inspectable_and_restorable(
-    official_gateway_source, tmp_path, monkeypatch, action
+    official_gateway_source, tmp_path, monkeypatch, historical_revision
 ):
     from dataclasses import replace
     import hashlib
@@ -564,20 +564,20 @@ def test_exact_historical_504_install_remains_inspectable_and_restorable(
     original_config = binding.config_path.read_bytes()
     # Execute the immutable historical renderer, not a permissive new remover.
     fixture_dir = Path(__file__).resolve().parents[1] / "fixtures"
-    old_source = (fixture_dir / "hybrid_renderers_504.py.txt").read_bytes()
+    old_source = (fixture_dir / f"hybrid_renderers_{historical_revision}.py.txt").read_bytes()
     evidence = json.loads(
-        (fixture_dir / "hybrid_renderers_504.provenance.json").read_text()
+        (fixture_dir / f"hybrid_renderers_{historical_revision}.provenance.json").read_text()
     )
     assert hashlib.sha256(old_source).hexdigest() == evidence["sha256"]
-    assert evidence["commit"] == "50499df9dbf164d00261a05e19359ec72d986153"
-    old_module = ModuleType("hermes_feishu_card.install._historical_504")
+    assert evidence["commit"] == {"504":"50499df9dbf164d00261a05e19359ec72d986153","cd86":"cd86b7fdc081f4471bb9538ae5c6554dd85147c4"}[historical_revision]
+    old_module = ModuleType(f"hermes_feishu_card.install._historical_{historical_revision}")
     old_module.__package__ = "hermes_feishu_card.install"
-    exec(compile(old_source, "<exact-504-renderer>", "exec"), old_module.__dict__)
+    exec(compile(old_source, f"<exact-{historical_revision}-renderer>", "exec"), old_module.__dict__)
     current = next(
         d for d in patcher.HYBRID_PATCH_DESCRIPTORS if d.group == "terminal_disposition"
     )
     old_base = tuple(
-        replace(d, fragments=d.fragments[:1]) if d.group == current.group else d
+        replace(d, fragments=d.fragments[:1]) if d.group == current.group and historical_revision == "504" else d
         for d in patcher.HYBRID_PATCH_DESCRIPTORS
     )
     old_descriptors = old_module.reviewed_descriptors(old_base)
@@ -611,19 +611,18 @@ def test_exact_historical_504_install_remains_inspectable_and_restorable(
         assert (root / (target + ".hermes_feishu_card.bak")).read_bytes() == originals[
             target
         ]
-    assert len(historical.fragments) == 1
-    if action == "inspect":
-        with pytest.raises(
-            v3.FixedTagInstallRefused,
-            match="verified historical Hybrid revision requires official restore",
-        ):
-            v3.inspect_fixed_tag_hybrid_install(
-                binding=binding, entrypoint=entrypoint, package_version="4.3.0"
-            )
-        assert all(
-            (root / target).read_bytes() == content
-            for target, content in installed.items()
+    assert len(historical.fragments) == {"504": 1, "cd86": 7}[historical_revision]
+    with pytest.raises(
+        v3.FixedTagInstallRefused,
+        match="verified historical Hybrid revision requires official restore",
+    ):
+        v3.inspect_fixed_tag_hybrid_install(
+            binding=binding, entrypoint=entrypoint, package_version="4.3.0"
         )
+    assert all(
+        (root / target).read_bytes() == content
+        for target, content in installed.items()
+    )
     assert v3.restore_fixed_tag_hybrid_install(binding=binding).status == "restored"
     assert all(
         (root / target).read_bytes() == content for target, content in originals.items()
