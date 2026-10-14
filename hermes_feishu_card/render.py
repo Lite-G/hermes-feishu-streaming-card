@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import copy
 from dataclasses import dataclass
 import html
@@ -11,6 +10,9 @@ import time as _time
 from collections.abc import Mapping
 from typing import Any, Dict, Literal, Optional
 
+from .display_redaction import (
+    KEY_VALUE_SECRET_RE, SECRET_FLAG_RE, URL_SECRET_RE, redact_tool_detail,
+)
 from .card_limits import CardLimitInspection, inspect_card_limits
 from .card_timeline import TERMINAL_TOOL_STATUSES
 from .approval_receipts import has_confirmed_approval_receipt
@@ -58,39 +60,7 @@ MODEL_COLOR_PREFIXES = (
 )
 
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
-_REDACTABLE_TOOL_DETAIL_KEYS = (
-    "tenant_access_token",
-    "app_secret",
-    "chat_id",
-    "open_id",
-    "message_id",
-    "password",
-    "token",
-    "secret",
-)
-_TOOL_DETAIL_KEY_PATTERN = (
-    r"[A-Za-z0-9_]*(?:"
-    + "|".join(re.escape(key) for key in _REDACTABLE_TOOL_DETAIL_KEYS)
-    + r")[A-Za-z0-9_]*"
-)
-_TOOL_DETAIL_REDACTION_RE = re.compile(
-    r"(?i)([\"']?"
-    + _TOOL_DETAIL_KEY_PATTERN
-    + r"[\"']?\s*[:=]\s*)([^\s,;&}\]]+)"
-)
-_TOOL_DETAIL_QUOTED_REDACTION_RE = re.compile(
-    r"(?is)([\"']?"
-    + _TOOL_DETAIL_KEY_PATTERN
-    + r"[\"']?\s*[:=]\s*)([\"'])(.*?)(\2)"
-)
-_TOOL_DETAIL_REDACTED = "[REDACTED]"
 _RUNTIME_FENCE_RE = re.compile(r"```[A-Za-z0-9_-]*")
-_RUNTIME_SECRET_FLAG_RE = re.compile(
-    r"(?i)(--(?:token|password|secret|api-key|app-secret)(?:=|\s+))([^\s]+)"
-)
-_RUNTIME_URL_SECRET_RE = re.compile(
-    r"(?i)([?&](?:token|password|secret|api_key|api-key|app_secret)=)([^&#\s]+)"
-)
 _TOOL_DURATION_LINE_RE = re.compile(r"^耗时:\s*(.+?)\s*$")
 
 
@@ -1200,9 +1170,9 @@ def _sanitize_runtime_header(
     normalized = normalize_stream_text(str(text or ""))
     normalized = _RUNTIME_FENCE_RE.sub("", normalized)
     normalized = " ".join(normalized.split())
-    normalized = _redact_tool_detail(normalized)
-    normalized = _RUNTIME_SECRET_FLAG_RE.sub(r"\1[REDACTED]", normalized)
-    normalized = _RUNTIME_URL_SECRET_RE.sub(r"\1[REDACTED]", normalized)
+    normalized = redact_tool_detail(normalized)
+    normalized = SECRET_FLAG_RE.sub(r"\1[REDACTED]", normalized)
+    normalized = URL_SECRET_RE.sub(r"\1[REDACTED]", normalized)
     if max_chars <= 0 or len(normalized) <= max_chars:
         return normalized
     return normalized[: max_chars - 1].rstrip() + "…"
@@ -1475,13 +1445,13 @@ def mask_approval_scope(text: str) -> str:
     """
     if not text:
         return text
-    masked = _RUNTIME_SECRET_FLAG_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", str(text))
-    masked = _RUNTIME_URL_SECRET_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
+    masked = SECRET_FLAG_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", str(text))
+    masked = URL_SECRET_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
     masked = _APPROVAL_SCOPE_ASSIGNMENT_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
     masked = _APPROVAL_SCOPE_BEARER_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
     masked = _APPROVAL_SCOPE_URL_USERINFO_RE.sub(rf"\1\2:{_APPROVAL_SCOPE_REDACTED}@", masked)
     masked = _APPROVAL_SCOPE_TOKEN_LITERAL_RE.sub(_APPROVAL_SCOPE_REDACTED, masked)
-    return _TOOL_DETAIL_REDACTION_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
+    return KEY_VALUE_SECRET_RE.sub(rf"\1{_APPROVAL_SCOPE_REDACTED}", masked)
 
 
 def _interaction_review_elements(interaction: Any, *, presentation: str = "classic") -> list[Dict[str, Any]]:
@@ -2233,7 +2203,7 @@ def _render_timeline_elements(
             )
         elif item.kind == "tool":
             full_detail, duration = _split_tool_timeline_detail(
-                _redact_tool_detail(item.detail)
+                redact_tool_detail(item.detail)
             )
             detail = _limit_text(
                 full_detail,
@@ -2249,7 +2219,7 @@ def _render_timeline_elements(
                     and detail == full_detail):
                 tool = session.tools.get(item.tool_id)
                 current_detail = _split_tool_timeline_detail(
-                    _redact_tool_detail(tool.detail)
+                    redact_tool_detail(tool.detail)
                 )[0] if tool is not None else None
                 if current_detail == full_detail:
                     rendered_tool_ids.add(item.tool_id)
@@ -2857,60 +2827,3 @@ def _limit_text(text: str, limit: int, *, overflow_label: str = "内容已折叠
         return text
     suffix = f"\n> {overflow_label}"
     return text[: max(0, limit - len(suffix))].rstrip() + suffix
-
-
-def _redact_tool_detail(text: str) -> str:
-    if not text:
-        return text
-    structured = _parse_tool_detail(text)
-    if structured is not None:
-        return _dump_redacted_tool_detail(structured)
-    redacted = _TOOL_DETAIL_QUOTED_REDACTION_RE.sub(
-        lambda match: f"{match.group(1)}{match.group(2)}{_TOOL_DETAIL_REDACTED}{match.group(4)}",
-        text,
-    )
-    redacted = _TOOL_DETAIL_REDACTION_RE.sub(r"\1[REDACTED]", redacted)
-    # CLI-flag and query-string shapes (--password secret, ?token=abc) slip past the
-    # key/value scanners above. The header sanitizer already sweeps them; tool detail is
-    # rendered in the timeline and in the tool-activity rows too, so sweep here as well.
-    redacted = _RUNTIME_SECRET_FLAG_RE.sub(r"\1[REDACTED]", redacted)
-    return _RUNTIME_URL_SECRET_RE.sub(r"\1[REDACTED]", redacted)
-
-
-def _parse_tool_detail(text: str) -> tuple[str, Any] | None:
-    try:
-        return ("json", _redact_tool_detail_value(json.loads(text)))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        pass
-    try:
-        return ("python", _redact_tool_detail_value(ast.literal_eval(text)))
-    except (SyntaxError, ValueError):
-        return None
-
-
-def _redact_tool_detail_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        redacted: dict[Any, Any] = {}
-        for key, item in value.items():
-            if _is_sensitive_tool_detail_key(str(key)):
-                redacted[key] = _TOOL_DETAIL_REDACTED
-            else:
-                redacted[key] = _redact_tool_detail_value(item)
-        return redacted
-    if isinstance(value, list):
-        return [_redact_tool_detail_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_tool_detail_value(item) for item in value)
-    return value
-
-
-def _dump_redacted_tool_detail(parsed: tuple[str, Any]) -> str:
-    format_name, value = parsed
-    if format_name == "json":
-        return json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
-    return repr(value)
-
-
-def _is_sensitive_tool_detail_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(part in lowered for part in _REDACTABLE_TOOL_DETAIL_KEYS)

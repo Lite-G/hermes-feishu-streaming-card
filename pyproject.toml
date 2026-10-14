@@ -68,6 +68,7 @@ target-version = "py39"
 include = [
   "hermes_feishu_card/cli_reports.py",
   "hermes_feishu_card/card_view.py",
+  "hermes_feishu_card/display_redaction.py",
   "hermes_feishu_card/event_rules.py",
   "hermes_feishu_card/native_admission.py",
   "hermes_feishu_card/turn_events.py",
@@ -102,6 +103,7 @@ python_version = "3.12"
 files = [
   "hermes_feishu_card/cli_reports.py",
   "hermes_feishu_card/card_view.py",
+  "hermes_feishu_card/display_redaction.py",
   "hermes_feishu_card/event_rules.py",
   "hermes_feishu_card/native_admission.py",
   "hermes_feishu_card/turn_events.py",

@@ -12,6 +12,7 @@
 | 交互容量预检、回调拒绝分类、双时限、文本回退请求资格、审批窗口及返回后原 owner 校验 | `interaction_rules` | server 在原锁内读取 owner、执行 expiry/状态提交；身份拒绝先于投递占位，模式解析保持短路，网络返回后重新加锁校验冻结身份；重展不执行 resolver |
 | 辅助交互回执的只读投影 | `interaction_receipts` | server 选择已加载配置、实际 owner/dialect，负责保存和投递；纯投影保留原内容，剥离操作/token，超限拒绝而不截断授权范围 |
 | task 状态投影、颜色语义 | `card_view` | `presentation` 修改已知显示字段；不改执行或授权状态 |
+| 进程观察与卡片文本的共享脱敏 | `display_redaction` | `process_activity` 和 renderer 直接调用同一纯函数；共享 key/value、CLI flag、URL query 规则，不反向导入 session/render，调用方保留原规范化和裁切顺序 |
 | 正文的完整来源与显示表示 | `content_plan`、`native_tables`、`text` | renderer 组合卡片并由共享 serializer 裁决最终容量 |
 | 命令卡纯构造 | `command_cards` | hook_runtime 保留 producer、callback 注册、adapter identity 与命令执行 |
 | turn-local observer 序号、terminal barrier 和有界 worker | `turn_events` | PluginRuntime 保留 producer 归属、registry/map 与锁顺序；允许的 producer 名称不是排他所有权证明 |

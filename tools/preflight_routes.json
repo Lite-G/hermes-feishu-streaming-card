@@ -381,6 +381,10 @@
     "hermes_feishu_card/process.py": [
       "process"
     ],
+    "hermes_feishu_card/display_redaction.py": [
+      "render",
+      "appearance"
+    ],
     "hermes_feishu_card/process_activity.py": [
       "render"
     ],
