@@ -498,7 +498,7 @@ def test_reset_clears_module_state_without_breaking_callback_registration():
     context = PluginContext()
     assert register_callbacks(context) is None
     assert set(context.registered) == {
-        "pre_llm_call", "post_llm_call", "on_session_end",
+        "pre_llm_call", "post_llm_call", "post_api_request", "on_session_end",
         "on_session_reset", "on_session_finalize", "pre_tool_call",
         "post_tool_call", "pre_approval_request", "post_approval_response",
         "subagent_start", "subagent_stop",
@@ -2543,7 +2543,7 @@ def test_runtime_interaction_admission_rejects_lookalikes_without_consuming_nati
     runtime.close()
 
 
-def test_runtime_interaction_unknown_transport_retry_reuses_byte_equivalent_event():
+def test_runtime_interaction_unknown_without_delivery_query_sends_once_and_fails_open():
     posted = []
     responses = [None, {
         "ok": True,
@@ -2558,12 +2558,51 @@ def test_runtime_interaction_unknown_transport_retry_reuses_byte_equivalent_even
     assert runtime.register_patch_interaction(*values) is True
     runtime._post = lambda payload, timeout: posted.append(payload) or responses.pop(0)
 
-    assert runtime.admit_patch_interaction(
-        *values, lambda choice: True, _runtime_interaction_ui()
-    ) is True
-    assert len(posted) == 2
-    assert posted[0] == posted[1]
-    runtime.close()
+    try:
+        assert runtime.admit_patch_interaction(
+            *values, lambda choice: True, _runtime_interaction_ui()
+        ) is False
+        assert len(posted) == 1
+        assert len(responses) == 1  # Never consume a second POST response.
+        state = next(iter(runtime._patch_interactions.values()))
+        assert state.hfc_owned is False and state.selected_value is None
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("confirmed", [True, False, 1, "raises"])
+def test_runtime_interaction_unknown_uses_detached_query_without_claiming_execution(confirmed):
+    posted, queries = [], []
+    runtime = active_task4_runtime(posted)
+    assert runtime.start_runtime_interaction_listener(b"r" * 32) is True
+    values = patch_interaction_args(object())
+    assert runtime.register_patch_interaction(*values) is True
+
+    class Transport:
+        def __call__(self, payload, timeout):
+            posted.append(payload)
+            return None
+
+        def confirm_interaction_delivery(self, payload, timeout):
+            queries.append((payload, timeout))
+            if confirmed == "raises":
+                raise RuntimeError("synthetic delivery query failed")
+            return confirmed
+
+    runtime._post = Transport()
+    try:
+        assert runtime.admit_patch_interaction(
+            *values, lambda choice: True, _runtime_interaction_ui()
+        ) is (confirmed is True)
+        assert len(posted) == len(queries) == 1
+        assert posted[0] == queries[0][0]
+        assert queries[0][1] == 3.0
+        state = next(iter(runtime._patch_interactions.values()))
+        assert state.hfc_owned is (confirmed is True)
+        assert state.selected_value is None
+        assert runtime.claim_patch_interaction(*values) is None
+    finally:
+        runtime.close()
 
 
 @pytest.mark.parametrize(
