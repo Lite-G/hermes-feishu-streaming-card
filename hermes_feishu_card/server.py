@@ -5670,6 +5670,18 @@ def _render_static_display_card(app, snapshot, *, session_key, note, display_sta
             # observation/action or repeated footer would imply live execution.
             card["body"]["elements"] = [e for e in card["body"]["elements"]
                 if e.get("element_id") not in {"footer", "main_divider", "task_observation", "task_action"}]
+            if display_state == "display_handoff":
+                # Preserve earlier content, but do not repeat an expanded answer
+                # beside its confirmed continuation. Avoid nested panels.
+                from .owner_display_policy import collapsed_transfer_elements
+                transferred = collapsed_transfer_elements(card["body"]["elements"])
+                if transferred is None:
+                    return None
+                card["body"]["elements"] = transferred
+                card["header"] = {
+                    "template": "blue",
+                    "title": {"tag": "plain_text", "content": "已转入续答"},
+                }
         if not inspect_card_limits(card).safe:
             return None
         return card
@@ -5708,10 +5720,14 @@ async def _retire_continuation_predecessor(app, session_key, message_id, snapsho
                 and len(owner.approval_retirements) < 32):
             clean = copy.deepcopy(card)
             elements = clean.get("body", {}).get("elements", [])
-            clean["body"]["elements"] = [e for e in elements
-                if not str(e.get("element_id", "")).startswith("interaction_review_")
-                and e.get("element_id") != "interaction_result"]
-            if len(elements) != len(clean["body"]["elements"]):
+            def keep_receipt_element(element):
+                return (not str(element.get("element_id", "")).startswith("interaction_review_")
+                        and element.get("element_id") != "interaction_result")
+            clean["body"]["elements"] = [e for e in elements if keep_receipt_element(e)]
+            for element in clean["body"]["elements"]:
+                if element.get("tag") == "collapsible_panel" and element.get("element_id") == "previous_content":
+                    element["elements"] = [e for e in element["elements"] if keep_receipt_element(e)]
+            if card != clean:
                 receipt = copy.deepcopy(interaction)
                 receipt.callback_token = ""
                 receipt.runtime_admission = None

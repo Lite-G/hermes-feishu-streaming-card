@@ -2075,6 +2075,9 @@ def _tool_terminal_pill(tool: ToolState) -> tuple[str, str]:
     status = str(tool.status or "").strip().lower()
     if status in {"display_handoff", "display_receipt"}:
         return ("已转入续答" if status == "display_handoff" else "已记录"), "neutral"
+    if status in {"blocked", "timeout", "unverified"}:
+        return {"blocked": ("已拒绝", "orange"), "timeout": ("已超时", "orange"),
+                "unverified": ("结果待核对", "neutral")}[status]
     if status in {"failed", "error", "cancelled", "canceled"}:
         return _FAILED_TOOL_PILL
     if status == "interrupted":
@@ -2426,6 +2429,10 @@ def _render_tool_timeline_row(
     }:
         color = "green"
         headline = f"✓ **{safe_title}**{meta_suffix}"
+    elif normalized_status in {"blocked", "timeout", "unverified"}:
+        color = "grey" if normalized_status == "unverified" else "orange"
+        label = {"blocked": "已拒绝", "timeout": "已超时", "unverified": "结果待核对"}[normalized_status]
+        headline = f"⊘ **{safe_title}**{meta_suffix} · {label}"
     elif normalized_status in {"failed", "error", "失败", "已失败", "错误"}:
         color = "red"
         headline = f"✕ **{safe_title}**{meta_suffix} · 失败"

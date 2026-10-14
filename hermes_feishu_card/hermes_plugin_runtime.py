@@ -285,6 +285,9 @@ class TurnBinding:
     ingress: IngressBinding
     turn_id: str
     _state: TurnState = field(default=TurnState.PENDING_START, init=False, repr=False, compare=False)
+    # Display-only outcomes from matched original approval callbacks, never authority.
+    _approval_tool_outcomes: dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
+    _approval_outcome_overflow: bool = field(default=False, init=False, repr=False, compare=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
 
     @property
@@ -1710,6 +1713,15 @@ class PluginRuntime:
             pending = self._pending_approvals.pop(key, None)
             self._claimed_approvals.discard(key)
             coordinator = self._card_active_coordinator_locked(turn_id)
+            turn = self._turns.get(turn_id)
+            if (pending is not None and coordinator is not None and turn is not None
+                    and turn.ingress.gateway_session_key == session_key
+                    and choice in {"deny", "timeout"}):
+                outcomes = turn._approval_tool_outcomes
+                if len(outcomes) < 128 or tool_call_id in outcomes:
+                    outcomes[tool_call_id] = "blocked" if choice == "deny" else "timeout"
+                else:
+                    turn._approval_outcome_overflow = True
         if pending is None or coordinator is None:
             return None
         if pending.hfc_owned:
@@ -1936,6 +1948,25 @@ class PluginRuntime:
         if coordinator is None:
             return
         status = "pending" if pending else self._tool_status(kwargs.get("status"))
+        if not pending:
+            with self._lock:
+                turn = self._turns.get(turn_id)
+                outcome = None
+                if (turn is not None and (tool_call_id in turn._approval_tool_outcomes
+                        or turn._approval_outcome_overflow)
+                        and kwargs.get("session_id") != turn.ingress.session_id):
+                    # Do not let an unrelated result occupy this call's terminal
+                    # event identity before the matched approval result arrives.
+                    return
+                if (turn is not None and turn.accepts_observer_events
+                        and kwargs.get("session_id") == turn.ingress.session_id):
+                    outcome = turn._approval_tool_outcomes.get(tool_call_id)
+                    if outcome is None and turn._approval_outcome_overflow:
+                        outcome = "unverified"
+            reported_status = kwargs.get("status")
+            if (outcome is not None and type(reported_status) is str
+                    and reported_status.strip().lower() in {"ok", "error"}):
+                status = outcome
         data: dict[str, object] = {
             "tool_id": tool_call_id,
             "call_id": tool_call_id,

@@ -6,7 +6,7 @@ I/O and mutations. Failed-receipt rendering must precede card-source selection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 
 OwnerCardSource = Literal["current_render", "separate_receipt", "callback_owner", "text_receipt_owner"]
@@ -63,3 +63,35 @@ class OwnerRefreshState:
         ):
             return "text_receipt_owner"
         return "current_render"
+
+
+def collapsed_transfer_elements(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """Collapse a retired display copy; retain content without nested panels.
+
+    Called only after a continuation send was confirmed. No execution state or
+    source session is changed; budget failure leaves the original card intact.
+    """
+    children: list[dict[str, Any]] = []
+    def append(items: list[dict[str, Any]]) -> None:
+        for item in items:
+            if item.get("tag") == "collapsible_panel":
+                append(item.get("elements", []))
+            elif item.get("tag") in {"markdown", "hr"}:
+                children.append(item)
+            else:
+                raise ValueError("unsupported transfer panel child")
+    try:
+        append(elements)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not children:
+        return []
+    return [{
+        "tag": "collapsible_panel",
+        "element_id": "previous_content",
+        "expanded": False,
+        "header": {"title": {"tag": "plain_text", "content": "此前内容（点按展开/收起）"}},
+        "border": {"color": "grey", "corner_radius": "8px"},
+        "padding": "8px 8px 8px 8px",
+        "elements": children,
+    }]
