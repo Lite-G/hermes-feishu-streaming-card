@@ -64,7 +64,11 @@ def valid_auxiliary_receipt(receipt: object) -> bool:
     return inspect_card_limits(auxiliary_receipt_card(receipt)).safe
 
 
-def legacy_owner_body(receipt, source_card, primary_text=None):
+def legacy_owner_body(
+    receipt: dict[str, Any],
+    source_card: dict[str, Any],
+    primary_text: str | None = None,
+) -> dict[str, Any]:
     """Retain the question/decision and add an answer in the same dialect.
 
     Tables remain full Markdown text on this fallback rail. Every returned
