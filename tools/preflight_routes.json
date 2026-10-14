@@ -555,6 +555,26 @@
     ],
     "tests/integration/test_message_navigation_http.py": [
       "client"
+    ],
+    "hermes_feishu_card/install/source_layout.py": [
+      "install_transactions",
+      "diagnostics",
+      "upstream"
+    ],
+    "hermes_feishu_card/install/errors.py": [
+      "install_transactions",
+      "diagnostics",
+      "upstream"
+    ],
+    "hermes_feishu_card/install/git_evidence.py": [
+      "install_transactions",
+      "diagnostics",
+      "upstream"
+    ],
+    "hermes_feishu_card/install/decomposed_ownership.py": [
+      "install_transactions",
+      "diagnostics",
+      "upstream"
     ]
   }
 }

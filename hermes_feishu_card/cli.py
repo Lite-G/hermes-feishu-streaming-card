@@ -2212,16 +2212,17 @@ def _summarize_process_output(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def _diagnose_install_state(detection: HermesDetection) -> dict[str, Any]:
-    from .install import decomposed
-    if detection.decomposed or decomposed.is_managed(detection.root):
-        plan = decomposed.plan(detection)
+    from .install import decomposed_ownership
+    from .install import recovery as recovery_owner
+    if detection.decomposed or decomposed_ownership.is_managed(detection.root):
+        plan = recovery_owner._plan_decomposed_recovery(detection)
         report = {"checked": True, "status": plan.state,
                 "manifest_exists": (detection.root / MANIFEST_NAME).exists(),
-                "manual_action_required": plan.state in {"refused", *decomposed.EXPLICIT_UPGRADE_STATES},
+                "manual_action_required": plan.state in {"refused", *decomposed_ownership.EXPLICIT_UPGRADE_STATES},
                 "automatic_repair_available": plan.executable,
                 "message": "Decomposed ownership: " + plan.state}
-        if plan.state in decomposed.EXPLICIT_UPGRADE_STATES:
-            accepted = decomposed.plan(detection, accept_hermes_upgrade=True)
+        if plan.state in decomposed_ownership.EXPLICIT_UPGRADE_STATES:
+            accepted = recovery_owner._plan_decomposed_recovery(detection, accept_hermes_upgrade=True)
             if accepted.executable:
                 report["message"] = (
                     "Hermes source changed and HFC hooks need reinstalling; an updater/autostash "
@@ -3757,7 +3758,7 @@ def _run_install(args: argparse.Namespace) -> int:
         return fixed_tag_result
 
     if detection.decomposed:
-        from .install.decomposed import install as install_decomposed
+        from .install.recovery import install_decomposed
         try:
             changed = install_decomposed(
                 detection, no_repair=bool(getattr(args, "no_repair", False)),
@@ -4335,10 +4336,11 @@ def _repair_action_message(action: str) -> str:
 
 
 def _restore(hermes_root: Path) -> None:
-    from .install import decomposed
+    from .install import decomposed_ownership
+    from .install import recovery as recovery_owner
     detection = detect_hermes(hermes_root)
-    if detection.decomposed or decomposed.is_managed(hermes_root):
-        decomposed.restore(detection)
+    if detection.decomposed or decomposed_ownership.is_managed(hermes_root):
+        recovery_owner.restore_decomposed(detection)
         return
     run_py = hermes_root / "gateway" / "run.py"
     cron_py = hermes_root / "cron" / "scheduler.py"

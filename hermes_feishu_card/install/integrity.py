@@ -7,9 +7,10 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 from typing import Any, Callable
 
+from . import git_evidence
+from .errors import IntegrityRepairRefused as IntegrityRepairRefused
 from .detect import HermesDetection
 from .manifest import validate_install_manifest
 from .patcher import (
@@ -35,7 +36,6 @@ from .recovery import (
 
 
 INTEGRITY_MANIFEST_VERSION = 2
-_GIT_HASH_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OwnedWriteSnapshot = tuple[int, int, str]
 _DirectoryIdentity = tuple[int, int]
@@ -60,8 +60,6 @@ def _require_secure_dirfd_transactions() -> None:
 
 
 
-class IntegrityRepairRefused(ValueError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -112,10 +110,10 @@ def build_integrity_provenance(
         return _monolithic_snapshot_provenance(
             run_source=run_source, cron_source=cron_source, base_source=base_source,
         )
-    root_path = _exact_git_root(Path(root))
-    head = _git_head(root_path)
+    root_path = git_evidence._exact_git_root(Path(root))
+    head = git_evidence._git_head(root_path)
     run_relative = _relative_regular_path(root_path, Path(run_py))
-    if _git_blob(root_path, head, run_relative) != run_source:
+    if git_evidence._git_blob(root_path, head, run_relative) != run_source:
         raise IntegrityRepairRefused("gateway source does not match Git HEAD")
     provenance: dict[str, Any] = {
         "version": INTEGRITY_MANIFEST_VERSION,
@@ -126,14 +124,14 @@ def build_integrity_provenance(
         if cron_source is None:
             raise IntegrityRepairRefused("cron provenance is incomplete")
         cron_relative = _relative_regular_path(root_path, Path(cron_py))
-        if _git_blob(root_path, head, cron_relative) != cron_source:
+        if git_evidence._git_blob(root_path, head, cron_relative) != cron_source:
             raise IntegrityRepairRefused("cron source does not match Git HEAD")
         provenance["cron_blob_sha256"] = _text_sha256(cron_source)
     if base_py is not None:
         if base_source is None:
             raise IntegrityRepairRefused("exact Base provenance is incomplete")
         base_relative = _relative_regular_path(root_path, Path(base_py))
-        if _git_blob(root_path, head, base_relative) != base_source:
+        if git_evidence._git_blob(root_path, head, base_relative) != base_source:
             raise IntegrityRepairRefused("exact Base source does not match Git HEAD")
         provenance["base_blob_sha256"] = _text_sha256(base_source)
     return provenance
@@ -153,7 +151,7 @@ def plan_integrity_repair(detection: HermesDetection) -> IntegrityRepairPlan:
     manifest = _read_manifest(detection.root / MANIFEST_NAME)
     integrity = manifest.get("integrity") if manifest is not None else None
     if manifest is not None and manifest.get("manifest_version") == 4:
-        from .decomposed import verified_snapshot_provenance
+        from .decomposed_ownership import verified_snapshot_provenance
         # A local snapshot proves only this installation. It does not grant
         # permission to mutate an upstream upgrade, with or without Git.
         if base_plan.state != "installed":
@@ -199,11 +197,11 @@ def plan_integrity_repair(detection: HermesDetection) -> IntegrityRepairPlan:
         return _plan(base_plan, executable, reason, evidence)
 
     try:
-        root = _exact_git_root(detection.root)
+        root = git_evidence._exact_git_root(detection.root)
         old_head = str(integrity["git_head"])
-        current_head = _git_head(root)
+        current_head = git_evidence._git_head(root)
         evidence["current_head"] = current_head
-        if not _is_ancestor(root, old_head, current_head):
+        if not git_evidence._is_ancestor(root, old_head, current_head):
             reason = "git_history_not_descendant"
             return _plan(base_plan, executable, reason, evidence)
 
@@ -242,18 +240,18 @@ def plan_integrity_repair(detection: HermesDetection) -> IntegrityRepairPlan:
             if old_backup.is_symlink() or not old_backup.is_file():
                 reason = "owned_backup_invalid"
                 return _plan(base_plan, executable, reason, evidence)
-            old_blob = _git_blob(root, old_head, relative)
+            old_blob = git_evidence._git_blob(root, old_head, relative)
             if (
                 _text_sha256(old_blob) != old_blob_hash
                 or _text_sha256(_read_text(old_backup)) != old_blob_hash
             ):
                 reason = "owned_backup_mismatch"
                 return _plan(base_plan, executable, reason, evidence)
-            if _git_target_status(root, relative):
+            if git_evidence._git_target_status(root, relative):
                 reason = "git_target_modified"
                 return _plan(base_plan, executable, reason, evidence)
             current_source = _read_text(target)
-            if current_source != _git_blob(root, current_head, relative):
+            if current_source != git_evidence._git_blob(root, current_head, relative):
                 reason = "git_target_modified"
                 return _plan(base_plan, executable, reason, evidence)
             current_sources[target] = current_source
@@ -455,7 +453,7 @@ def _render_integrity_manifest_migration(
         raise IntegrityRepairRefused("integrity evidence changed; rerun diagnosis")
     manifest = dict(manifest)
     if manifest.get("manifest_version") == 4:
-        from .decomposed import verified_snapshot_provenance
+        from .decomposed_ownership import verified_snapshot_provenance
         try:
             provenance = verified_snapshot_provenance(detection.root)
         except (OSError, ValueError, UnicodeError) as exc:
@@ -662,7 +660,7 @@ def _valid_integrity_manifest(value: Any, has_cron: bool, has_base: bool) -> boo
     return bool(
         value.get("version") == INTEGRITY_MANIFEST_VERSION
         and isinstance(value.get("git_head"), str)
-        and _GIT_HASH_RE.fullmatch(str(value["git_head"]))
+        and git_evidence._GIT_HASH_RE.fullmatch(str(value["git_head"]))
         and _SHA256_RE.fullmatch(str(value["run_blob_sha256"]))
         and (
             not has_cron
@@ -693,72 +691,16 @@ def _plan(
     )
 
 
-def _exact_git_root(root: Path) -> Path:
-    resolved = root.resolve()
-    result = _run_git(resolved, "rev-parse", "--show-toplevel")
-    try:
-        toplevel = Path(result.stdout.decode("utf-8").strip()).resolve()
-    except UnicodeError as exc:
-        raise IntegrityRepairRefused("git_root_invalid") from exc
-    if toplevel != resolved:
-        raise IntegrityRepairRefused("git_root_invalid")
-    return resolved
 
 
-def _git_head(root: Path) -> str:
-    result = _run_git(root, "rev-parse", "HEAD")
-    head = result.stdout.decode("ascii", errors="ignore").strip().lower()
-    if _GIT_HASH_RE.fullmatch(head) is None:
-        raise IntegrityRepairRefused("git_head_invalid")
-    return head
 
 
-def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(root), "merge-base", "--is-ancestor", ancestor, descendant],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=5,
-    )
-    if result.returncode not in {0, 1}:
-        raise IntegrityRepairRefused("git_history_unavailable")
-    return result.returncode == 0
 
 
-def _git_blob(root: Path, revision: str, relative: str) -> str:
-    result = _run_git(root, "show", f"{revision}:{relative}")
-    try:
-        return result.stdout.decode("utf-8")
-    except UnicodeError as exc:
-        raise IntegrityRepairRefused("git_blob_invalid") from exc
 
 
-def _git_target_status(root: Path, relative: str) -> str:
-    result = _run_git(
-        root,
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=no",
-        "--",
-        relative,
-    )
-    return result.stdout.decode("utf-8", errors="replace").strip()
 
 
-def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), *args],
-            check=False,
-            capture_output=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise IntegrityRepairRefused("git_evidence_unavailable") from exc
-    if result.returncode != 0:
-        raise IntegrityRepairRefused("git_evidence_unavailable")
-    return result
 
 
 def _relative_regular_path(root: Path, path: Path) -> str:

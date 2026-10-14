@@ -2,6 +2,10 @@ import ast
 import re
 import textwrap
 
+from .source_layout import (
+    DECOMPOSED_GATEWAY_TARGETS as DECOMPOSED_GATEWAY_TARGETS,
+    DECOMPOSED_TARGETS as DECOMPOSED_TARGETS,
+)
 from . import stop_cancellation
 from .gateway_contracts import find_stale_interrupted_location
 from .cron_contracts import (
@@ -4032,12 +4036,22 @@ HYBRID_PATCH_REGISTRY = PatchDescriptorRegistry(
 
 # September 2026 facade layout. Keep this separate from the fixed-tag Hybrid
 # descriptor registry: source layout is not evidence of native hook support.
-DECOMPOSED_GATEWAY_TARGETS = (
-    "gateway/run_turn.py", "gateway/run_turn_runner.py", "gateway/run_inbound.py",
-    "gateway/run_busy.py", "gateway/run_startup.py", "gateway/run_notifications.py",
-)
-DECOMPOSED_TARGETS = (*DECOMPOSED_GATEWAY_TARGETS,
-                      "cron/scheduler_delivery.py", "gateway/platforms/base.py")
+DECOMPOSED_LAYOUT_MARKERS = {
+    "message_handler": PATCH_BEGIN,
+    "completion_return": COMPLETE_PATCH_BEGIN,
+    "tool_callback": STABLE_TOOL_PATCH_BEGIN,
+    "answer_delta_callback": ANSWER_DELTA_PATCH_BEGIN,
+    "thinking_delta_callback": THINKING_DELTA_PATCH_BEGIN,
+    "status_callback": STATUS_PATCH_BEGIN,
+    "clarify_callback": CLARIFY_PATCH_BEGIN,
+    "approval_callback": APPROVAL_PATCH_BEGIN,
+    "command_card": COMMAND_CARD_PATCH_BEGIN,
+    "hfc_command": HFC_COMMAND_PATCH_BEGIN,
+    "slash_confirm": SLASH_CONFIRM_PATCH_BEGIN,
+    "startup": COMMAND_CARD_STARTUP_PATCH_BEGIN,
+    "redelivery": NATIVE_REDELIVERY_PATCH_BEGIN,
+    "platform_notice": PLATFORM_NOTICE_PATCH_BEGIN,
+}
 
 
 def apply_gateway_fragment(content: str, target: str, *, strategy="gateway_run_013_plus") -> str:

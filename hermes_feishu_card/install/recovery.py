@@ -14,6 +14,12 @@ import time
 from typing import Dict, Iterator, List, Optional, Tuple
 from uuid import uuid4
 
+from . import decomposed_ownership
+from .source_layout import (
+    BACKUP_SUFFIX as BACKUP_SUFFIX, MANIFEST_NAME as MANIFEST_NAME,
+    DECOMPOSED_MANIFEST_VERSION, DECOMPOSED_SOURCE_TARGETS,
+)
+from .manifest import validate_decomposed_manifest
 from . import posix_transaction as bound_io
 from .posix_transaction import (
     BoundStage as _StagedText,
@@ -39,8 +45,6 @@ from .patcher import (
 )
 
 
-BACKUP_SUFFIX = ".hermes_feishu_card.bak"
-MANIFEST_NAME = ".hermes_feishu_card_manifest"
 KNOWN_STATES = {
     "clean",
     "installed",
@@ -211,14 +215,13 @@ def execute_recovery(
     accept_hermes_upgrade: bool = False,
 ) -> RecoveryResult:
     _require_secure_dirfd_transactions()
-    from . import decomposed
-    if detection.decomposed or decomposed.is_managed(detection.root):
-        fresh = decomposed.plan(detection, accept_hermes_upgrade=accept_hermes_upgrade)
+    if detection.decomposed or decomposed_ownership.is_managed(detection.root):
+        fresh = _plan_decomposed_recovery(detection, accept_hermes_upgrade=accept_hermes_upgrade)
         if expected_fingerprint and fresh.fingerprint != expected_fingerprint:
             raise RecoveryRefused("recovery evidence changed; rerun diagnosis")
         if not fresh.executable:
             raise RecoveryRefused("decomposed recovery is not executable")
-        decomposed.install(detection, expected_fingerprint=fresh.fingerprint,
+        install_decomposed(detection, expected_fingerprint=fresh.fingerprint,
                            accept_hermes_upgrade=accept_hermes_upgrade)
         return RecoveryResult("repaired", fresh, fresh.actions, None, "Owned hooks restored; Gateway restart required.")
     with _root_lock(detection.root):
@@ -1680,9 +1683,8 @@ def plan_recovery(
     *,
     accept_hermes_upgrade: bool = False,
 ) -> RecoveryPlan:
-    from . import decomposed
-    if detection.decomposed or decomposed.is_managed(detection.root):
-        return decomposed.plan(detection, accept_hermes_upgrade=accept_hermes_upgrade)
+    if detection.decomposed or decomposed_ownership.is_managed(detection.root):
+        return _plan_decomposed_recovery(detection, accept_hermes_upgrade=accept_hermes_upgrade)
     return _plan_from_evidence(
         detection,
         _read_evidence(detection),
@@ -2706,3 +2708,102 @@ def _deduplicate_findings(findings) -> Tuple[RecoveryFinding, ...]:
         seen.add(key)
         result.append(finding)
     return tuple(result)
+
+
+def _plan_decomposed_recovery(detection, *, accept_hermes_upgrade=False):
+    try:
+        snapshot, _, _, state = decomposed_ownership._inspect(detection.root)
+        fingerprint = decomposed_ownership._fingerprint(snapshot)
+        executable = state == "owned_incomplete" or (state in decomposed_ownership.EXPLICIT_UPGRADE_STATES and accept_hermes_upgrade and detection.supported)
+        actions = ("restore_owned_hooks",) if state == "owned_incomplete" else ("accept_hermes_upgrade",) if state in decomposed_ownership.EXPLICIT_UPGRADE_STATES else ()
+        findings = ()
+        if state == "stale_unpatched":
+            findings = (RecoveryFinding("hermes_upgrade_hooks_missing", "warning",
+                        "Hermes source changed without owned hooks (an updater/autostash may remove them). "
+                        "Use install --accept-hermes-upgrade --yes after reviewing the upgrade; "
+                        "restart Gateway after successful repair."),)
+        elif state == "stale_reapplied":
+            findings = (RecoveryFinding("hermes_upgrade_hooks_reapplied", "warning",
+                        "Known hooks were reapplied over the exact current Git sources while ownership remained stale. "
+                        "Review the upgrade and use install --accept-hermes-upgrade --yes; "
+                        "restart Gateway after successful repair."),)
+        return RecoveryPlan(detection.root, state, executable, fingerprint, actions, findings)
+    except (OSError, ValueError, UnicodeError):
+        try:
+            fingerprint = decomposed_ownership._fingerprint(decomposed_ownership._snapshot(detection.root))
+        except (OSError, ValueError):
+            fingerprint = sha256(b"unsafe decomposed evidence").hexdigest()
+        return RecoveryPlan(detection.root, "refused", False, fingerprint, (),
+                            (RecoveryFinding("user_modified", "error", "Decomposed ownership cannot be verified."),))
+
+
+def install_decomposed(detection, *, no_repair=False, expected_fingerprint=None, accept_hermes_upgrade=False):
+    from .detect import detect_hermes
+    with _root_lock(detection.root):
+        snapshot, originals, rendered, state = decomposed_ownership._inspect(detection.root)
+        if expected_fingerprint and decomposed_ownership._fingerprint(snapshot) != expected_fingerprint:
+            raise ValueError("recovery evidence changed; rerun diagnosis")
+        detection = detect_hermes(detection.root)
+        if not detection.supported:
+            raise ValueError("unsupported decomposed Hermes: " + detection.reason)
+        if state == "installed":
+            return False
+        if state in {"owned_incomplete", *decomposed_ownership.EXPLICIT_UPGRADE_STATES} and no_repair:
+            raise ValueError("decomposed ownership needs repair; --no-repair set")
+        if state in decomposed_ownership.EXPLICIT_UPGRADE_STATES and not (accept_hermes_upgrade and detection.supported):
+            raise ValueError("decomposed source upgrade requires --accept-hermes-upgrade")
+        fresh = _plan_decomposed_recovery(detection, accept_hermes_upgrade=accept_hermes_upgrade)
+        if fresh.fingerprint != decomposed_ownership._fingerprint(snapshot):
+            raise ValueError("decomposed evidence changed before install")
+        rendered = rendered or decomposed_ownership.render(originals, detection.hook_strategy)
+        manifest = {
+            "manifest_version": DECOMPOSED_MANIFEST_VERSION, "layout": "gateway-decomposed-v1",
+            "integration_mode": "legacy-patch",
+            "targets": {name: {"path": name, "backup": name + BACKUP_SUFFIX,
+                                "original_sha256": sha256(raw).hexdigest(),
+                                "patched_sha256": sha256(rendered[name]).hexdigest()}
+                        for name, raw in originals.items()},
+        }
+        manifest["integrity"] = decomposed_ownership.snapshot_provenance(originals, rendered)
+        validate_decomposed_manifest(manifest)
+        changes = [(detection.root / name, raw.decode("utf-8")) for name, raw in rendered.items()
+                   if snapshot[name] != raw]
+        if state in {"clean", *decomposed_ownership.EXPLICIT_UPGRADE_STATES}:
+            changes = [(detection.root / (name + BACKUP_SUFFIX), raw.decode("utf-8"))
+                       for name, raw in originals.items()] + changes
+        changes.append((detection.root / MANIFEST_NAME, json.dumps(manifest, indent=2) + "\n"))
+        if _secure_dirfd_transactions_supported():
+            _commit_recovery_changes(detection, fresh, changes, accept_hermes_upgrade=accept_hermes_upgrade)
+        else:
+            # Explicit installation on Windows uses the same verified portable
+            # writer as the monolithic installer. Automatic recovery and backup
+            # deletion retain their stronger directory-handle requirement.
+            from .file_transaction import _snapshot_restore_evidence, _write_targets_portably
+            evidence = {name: detection.root / name for name in
+                        (*DECOMPOSED_SOURCE_TARGETS, *(n + BACKUP_SUFFIX for n in DECOMPOSED_SOURCE_TARGETS), MANIFEST_NAME)}
+            identities, directories = _snapshot_restore_evidence(detection.root, evidence)
+            if decomposed_ownership._fingerprint(decomposed_ownership._snapshot(detection.root)) != fresh.fingerprint:
+                raise ValueError("decomposed evidence changed before portable install")
+            _write_targets_portably(changes, expected_identities=identities,
+                                    expected_directories=directories,
+                                    preserve_earlier_writes_on_rollback_failure=True)
+        decomposed_ownership._inspect(detection.root)
+        return True
+
+
+def restore_decomposed(detection):
+    _require_secure_dirfd_transactions()
+    with _root_lock(detection.root):
+        snapshot, originals, _, state = decomposed_ownership._inspect(detection.root, render_hooks=False)
+        if state == "clean":
+            return
+        if state in decomposed_ownership.EXPLICIT_UPGRADE_STATES:
+            raise ValueError("decomposed source drift; refusing restore until upgrade is accepted")
+        fresh = _plan_decomposed_recovery(detection)
+        if fresh.fingerprint != decomposed_ownership._fingerprint(snapshot):
+            raise ValueError("decomposed evidence changed before restore")
+        changes = [(detection.root / name, raw.decode("utf-8")) for name, raw in originals.items()
+                   if snapshot[name] != raw]
+        changes.extend((detection.root / (name + BACKUP_SUFFIX), None) for name in originals)
+        changes.append((detection.root / MANIFEST_NAME, None))
+        _commit_recovery_changes(detection, fresh, changes)

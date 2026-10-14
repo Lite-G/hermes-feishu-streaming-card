@@ -54,7 +54,7 @@ Python 3.9 runtime coverage remains separate from this development-tool runtime.
 | Presentation and payload budgets | `card_view.py`, `content_plan.py`, `render.py`, `presentation.py`, `reading.py`, `render_options.py`, `card_limits.py` |
 | Feishu I/O and CardKit sequencing | `feishu_client.py`, `cardkit.py` |
 | Pure config values, presets, validation and merge | `config_rules.py`; config/reading/runtime policy consume the same rules without reverse imports |
-| Config, installation and safe recovery | `config.py`, `cli.py`, `install/` |
+| Config, installation and safe recovery | `config.py`, `cli.py`, `install/`; read-only source ownership in `install/decomposed_ownership.py`, family transactions in `install/recovery.py` |
 | Process credentials and service ownership | `process.py`, `runner.py`, `persistent_service.py` |
 | Bounded display/notice persistence | `session_store.py`, `notice_lifecycle.py` |
 | Current-owner input freeze and receipt replacement policy | `owner_display_policy.py` |

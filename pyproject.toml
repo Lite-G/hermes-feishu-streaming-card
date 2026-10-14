@@ -92,6 +92,10 @@ include = [
   "hermes_feishu_card/install/cron_contracts.py",
   "hermes_feishu_card/install/file_transaction.py",
   "hermes_feishu_card/install/posix_transaction.py",
+  "hermes_feishu_card/install/source_layout.py",
+  "hermes_feishu_card/install/errors.py",
+  "hermes_feishu_card/install/git_evidence.py",
+  "hermes_feishu_card/install/decomposed_ownership.py",
   "hermes_feishu_card/delivery.py",
   "hermes_feishu_card/terminal_delivery.py",
 ]
@@ -128,6 +132,10 @@ files = [
   "hermes_feishu_card/install/cron_contracts.py",
   "hermes_feishu_card/install/file_transaction.py",
   "hermes_feishu_card/install/posix_transaction.py",
+  "hermes_feishu_card/install/source_layout.py",
+  "hermes_feishu_card/install/errors.py",
+  "hermes_feishu_card/install/git_evidence.py",
+  "hermes_feishu_card/install/decomposed_ownership.py",
   "hermes_feishu_card/delivery.py",
   "hermes_feishu_card/terminal_delivery.py",
 ]

@@ -54,7 +54,7 @@ POSIX writer、bound helpers 和 capability 检查的产品消费者已全部改
 
 ## 仍需继续整理
 
-server 保留原锁内的交互校验、送达后身份复核及状态提交，理由和验收映射见[交互协议](interaction-protocol.md)。这些协调步骤不因仍位于 server 就需要另建服务。hook producer/SDK 接线、CLI 生命周期与 Gateway/cron 来源家族按实际职责和来源证明继续审查；不以拆完所有函数作为目标。移动端真机、五人上手试用和完整候选验收仍分别留在计划中，本页结构说明不能替代它们。
+server 保留原锁内的交互校验、送达后身份复核及状态提交，理由和验收映射见[交互协议](interaction-protocol.md)。这些协调步骤不因仍位于 server 就需要另建服务。hook producer/SDK 接线、CLI 生命周期与 Gateway/cron 来源家族按实际职责和来源证明继续审查；不以拆完所有函数作为目标。Android 与桌面真机、Bailey 本人上手和完整候选验收仍分别留在计划中；按 2026-10-14 的授权调整，不要求 iOS 与五位新用户试用，本页结构说明不能替代其余验收。
 
 native admission 的有 generation fence 与终态去重仍先于 policy；无 generation 的 legacy lifecycle 准备仍在 policy 之后。返回值分开保存 restore 时的 cache 更新和 expire 后的 selected record，后续拒绝也不能丢弃已发生的 cache 更新。四次 store 操作沿用各自的原子机制，不被描述为一个新的跨调用事务。
 
@@ -89,3 +89,16 @@ Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序�
 开发候选的 callback patcher 对 legacy 与 TurnRunner 共用唯一候选选择：先保留已有 required-call 优先级，再要求最终只有一个目标。唯一候选的兼容 fallback 保持；多个同等候选时不猜测第一个。owned marker 只能证明块归属，不能证明 callback 仍然接线，因此每次 apply 都移除原块并重新验证目标，包括没有 required calls 的 progress/interim 路径。
 
 无法确认的 optional seam 保持未注入，required seam 仍由已有安装门禁判定。marker/render/apply/remove 继续由 patcher 负责，没有新增 producer 或执行状态。该行为修复独立于前面的结构提取，完成情况以精确候选的独立歧义、旧 marker、TTS 优先级、实际 callback 执行及幂等恢复测试为准。
+
+
+## 安装来源证据与事务执行
+
+`install/source_layout.py` 持有已知 decomposed targets、布局与 V4 标识；通用安装 manifest 当前版本仍是 V3。V4 的完整结构验证在 `manifest.validate_decomposed_manifest`，不依赖安装或恢复入口。
+
+`decomposed_ownership` 持有只读 snapshot、指纹、backup/source 校验、可逆渲染与来源证明。它不导入 detect、recovery 或 integrity，不持有文件锁或执行写入。detect 与 ownership 共同消费 patcher 的完整 marker 描述。Git 查询由 `git_evidence` 执行，保留原来的五秒预算、精确 root/HEAD/blob 检查和错误语义；`errors.IntegrityRepairRefused` 在 integrity 直接重导出，仍是同一个 class。
+
+`recovery` 是两个来源家族的计划与事务执行所有者。原 decomposed 的完整 plan/install/restore 实现迁入该模块；锁内 detection、两次 fingerprint、全部 staging 后复核、提交顺序和回滚位置保持。显式 portable 安装与强目录绑定的自动恢复/卸载继续使用不同准入条件。
+
+`decomposed` 仅直接重导出既有名称，供已有安装测试与导入消费者兼容；产品内部直接调用 ownership 或 recovery。后续确认支持周期内无旧导入消费者后才能清退，不能恢复一份 wrapper 算法。故障注入应指向 `decomposed_ownership.render` 与 `git_evidence._run_git`，物理 I/O 与 Recovery 的原 fault seams 不迁移。源码、普通 wheel、实际安装恢复和平台验证分别登记，不由结构说明推定通过。
+
+安装包入口保留原 `__all__`，通过按需解析返回原实现对象；导入只读叶模块不再预先加载 detect/recovery。包级名称、对象身份和 `dir` 可发现性保持，未知名称仍抛 AttributeError。
