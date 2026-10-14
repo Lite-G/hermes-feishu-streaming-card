@@ -1900,7 +1900,8 @@ def test_footer_treats_explicit_completed_snapshot_as_terminal():
     footer = _render_footer(session, display_status="completed")
 
     assert "生成中" not in footer
-    assert footer.startswith("<text_tag color='green'>已完成</text_tag> · 1s · ")
+    assert footer == "<text_tag color='green'>已完成</text_tag> · 1s"
+    assert "Unknown" not in footer
 
 
 def test_waiting_footer_uses_absolute_remaining_deadline(monkeypatch):
