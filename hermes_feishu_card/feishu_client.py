@@ -14,6 +14,9 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 
+from .delivery import (
+    DeliveryFailureOutcome as DeliveryFailureOutcome, FeishuAPIError as FeishuAPIError,
+)
 from .card_limits import serialize_card_for_delivery
 from .message_navigation import MessageNavigation, navigation_from_response
 
@@ -69,30 +72,6 @@ def _retry_after_seconds(value: str | None) -> float | None:
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return seconds
-
-
-DeliveryFailureOutcome = Literal["not_sent", "unknown"]
-
-
-class FeishuAPIError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status_code: int | None = None,
-        api_code: int | str | None = None,
-        retryable: bool = False,
-        outcome: DeliveryFailureOutcome = "not_sent",
-        retry_after_seconds: float | None = None,
-        retry_count: int = 0,
-    ) -> None:
-        super().__init__(message)
-        self.status_code = status_code
-        self.api_code = api_code
-        self.retryable = retryable
-        self.outcome = outcome
-        self.retry_after_seconds = retry_after_seconds
-        self.retry_count = retry_count
 
 
 @dataclass(frozen=True)
