@@ -660,7 +660,7 @@ class PluginRuntime:
                     event_id="",
                     producer="patch",
                     phase="delta",
-                    data={"text": text, "mode": mode},
+                    data=self._bound_event_data(turn, {"text": text, "mode": mode}),
                 )
                 return coordinator.submit_observer(
                     payload,
@@ -702,7 +702,7 @@ class PluginRuntime:
                     event_id="",
                     producer="patch",
                     phase="started",
-                    data={
+                    data=self._bound_event_data(turn, {
                         "notice_kind": "context-compaction",
                         "notice_id": "context-compaction:active",
                         "notice_scope": "session",
@@ -712,7 +712,7 @@ class PluginRuntime:
                         "content": "正在总结较早的对话，完成后会继续当前任务。",
                         "create_session": True,
                         "display_status": "in_progress",
-                    },
+                    }),
                 )
                 return coordinator.submit_observer(
                     payload,
@@ -1091,7 +1091,7 @@ class PluginRuntime:
                         ),
                         producer="patch",
                         phase="started",
-                        data=data,
+                        data=self._bound_event_data(turn, data),
                     )
                     stored_payload = deepcopy(payload)
                     stored_descriptor = stored_payload["data"][
@@ -1404,16 +1404,14 @@ class PluginRuntime:
             event="message.started",
             event_id=coordinator.event_id("started"),
             phase="started",
-            data={
-                "profile_id": turn.ingress.profile_id,
-                "profile_source": turn.ingress.profile_source,
+            data=self._bound_event_data(turn, {
                 "reply_to_message_id": turn.ingress.reply_to_message_id,
                 # Gateway admission owns interruption scope. Never send the raw
                 # session key (which may include user/chat identifiers).
                 "execution_scope": sha256(
                     turn.ingress.gateway_session_key.encode("utf-8")
                 ).hexdigest(),
-            },
+            }),
         )
         with started_transport.gate:
             with self._lock:
@@ -1526,7 +1524,7 @@ class PluginRuntime:
             event=f"message.{terminal_kind}",
             event_id=f"turn:{turn_id}:{terminal_kind}",
             phase="terminal",
-            data=(
+            data=self._bound_event_data(turn, (
                 {"answer": answer}
                 if terminal_kind == "completed"
                 else {
@@ -1538,7 +1536,7 @@ class PluginRuntime:
                         kwargs.get("turn_exit_reason"), interrupted is True
                     ),
                 }
-            ),
+            )),
         )
         response = self._post_retry_unknown(
             payload,
@@ -1959,7 +1957,10 @@ class PluginRuntime:
         if turn is None or not turn.accepts_observer_events:
             return None
         payload = self._base_payload(turn, sequence=0, created_at=self._now())
-        payload.update(event=event, event_id=event_id, phase=phase, data=data)
+        payload.update(
+            event=event, event_id=event_id, phase=phase,
+            data=self._bound_event_data(turn, data),
+        )
         return payload
 
     def _approval_values(
@@ -2212,6 +2213,18 @@ class PluginRuntime:
             )
         except (OverflowError, TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _bound_event_data(
+        turn: TurnBinding, data: dict[str, object]
+    ) -> dict[str, object]:
+        # Session routing must use the authenticated ingress identity on every
+        # event, including patch-produced interactions and terminal messages.
+        return {
+            **data,
+            "profile_id": turn.ingress.profile_id,
+            "profile_source": turn.ingress.profile_source,
+        }
 
     def _base_payload(
         self, turn: TurnBinding, *, sequence: int, created_at: float
