@@ -339,3 +339,5 @@ Orphaned integrity fences can be explicitly rebound with `integrity acknowledge-
 ## V3 插件启用诊断
 
 官方 enable 命令失败与配置所有权拒绝分别呈现：preimage 后配置漂移、官方命令修改无关配置保留各自固定错误原因，便于定位。未知异常仍只显示 `official plugin enable failed`，不转发任意异常文本。原始异常通过 cause 保留供受控排查，配置恢复、prepared manifest 和源码写入门禁不变。
+
+Hermes 对已启用的插件可只更新 `allow_tool_override: false`，不排序启用列表，也不补写缺失的 `plugins.disabled`。安装器只在 preimage 已启用 HFC 时接受这个精确分支，同时保留原列表规范化分支；两种期望均在运行官方命令前从 preimage 派生。其他插件条目和非插件配置仍须完全一致，拒绝时仍逐字恢复配置，不能通过忽略整个 `plugins` 区域或预先改写用户配置规避检查。
