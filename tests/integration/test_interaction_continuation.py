@@ -319,7 +319,8 @@ async def test_task_handoff_has_one_honest_note_and_retains_tool_details(show_re
         await post(http, "answer.delta", 4, {"text": "NEW_RESULT"})
         await asyncio.sleep(.03)
         retired = next(card for mid, card in reversed(client.updated) if mid == old_id)
-        assert "本段已转入续答" in str(retired["header"])
+        assert retired["header"]["template"] == "blue"
+        assert retired["header"]["title"]["content"] == "已转入续答"
         assert str(retired["body"]).count("本段已转入续答") == 0
         assert "执行中" not in str(retired) and "已中断" not in str(retired)
         assert session.tools["live"].status == "running"
