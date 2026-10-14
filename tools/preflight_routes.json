@@ -18,7 +18,8 @@
       "tests/unit/test_content_plan.py",
       "tests/unit/test_observations.py",
       "tests/unit/test_display_redaction.py",
-      "tests/unit/test_existing_owner_projection.py"
+      "tests/unit/test_existing_owner_projection.py",
+      "tests/unit/test_plugin_turn_metrics.py"
     ],
     "config": [
       "tests/unit/test_config.py",
@@ -150,7 +151,8 @@
       "tests/unit/test_install_plugin.py",
       "tests/unit/test_native_hook_capabilities.py",
       "tests/unit/test_native_probe_diagnostics.py",
-      "tests/unit/test_clarify_delivery_admission.py"
+      "tests/unit/test_clarify_delivery_admission.py",
+      "tests/unit/test_plugin_turn_metrics.py"
     ],
     "storage": [
       "tests/unit/test_session_store.py",
