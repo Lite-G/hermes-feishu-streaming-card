@@ -685,7 +685,8 @@ def test_gitless_monolithic_install_and_migration_prove_snapshot_only(git_instal
     shutil.rmtree(root / ".git")
     def refuse_git(*_args, **_kwargs):
         raise AssertionError("snapshot verification must not invoke Git")
-    monkeypatch.setattr(integrity_module, "_run_git", refuse_git)
+    from hermes_feishu_card.install import git_evidence
+    monkeypatch.setattr(git_evidence, "_run_git", refuse_git)
     _write_manifest(root, detection, run_source, cron_source)
     manifest_path = root / integrity_module.MANIFEST_NAME
     manifest = json.loads(manifest_path.read_text())

@@ -30,7 +30,8 @@
       "tests/unit/test_gateway_contracts.py",
       "tests/unit/test_stale_interrupted_turn.py",
       "tests/unit/test_cron_contracts.py",
-      "tests/integration/test_cli_install.py"
+      "tests/integration/test_cli_install.py",
+      "tests/unit/test_installer_family_boundaries.py"
     ],
     "process": [
       "tests/unit/test_process.py",
@@ -49,7 +50,8 @@
       "tests/unit/test_package_metadata.py"
     ],
     "preflight": [
-      "tests/unit/test_preflight.py"
+      "tests/unit/test_preflight.py",
+      "tests/unit/test_installer_family_boundaries.py"
     ],
     "appearance": [
       "tests/unit/test_presentation.py",
