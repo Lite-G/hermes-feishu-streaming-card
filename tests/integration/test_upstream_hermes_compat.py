@@ -21,7 +21,7 @@ SOURCES = json.loads(
 )
 
 
-@pytest.mark.parametrize("baseline", ["stable", "main", "production", "historical", "image", "extracted", "latest_stable", "latest_main"])
+@pytest.mark.parametrize("baseline", ["stable", "main", "production", "historical", "image", "extracted", "latest_stable", "latest_main", "split_stable", "split_main"])
 def test_pinned_upstream_install_repeat_doctor_restore(baseline, tmp_path, monkeypatch):
     configured = os.environ.get(f"HFC_UPSTREAM_{baseline.upper()}_ROOT")
     if not configured:

@@ -43,8 +43,10 @@ def apply_provider_route_patch(content: str) -> str:
     clean = remove_provider_route_patch(content)
     tree = ast.parse(clean)
     candidates = []
+    # Hermes v0.22.1+ moved TurnRunner.run_sync's body into _run_sync_scoped;
+    # the single-candidate rule below still rejects any ambiguity.
     for owner in ast.walk(tree):
-        if not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) or owner.name not in {"run_sync", "_run_agent_inner"}:
+        if not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)) or owner.name not in {"run_sync", "_run_agent_inner", "_run_sync_scoped"}:
             continue
         for node in owner.body:
             if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):

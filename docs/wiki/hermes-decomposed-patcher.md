@@ -10,6 +10,8 @@
 | --- | --- |
 | `gateway/run_turn.py` | message.started、completion、调用方耗时传递；校验 post-turn `agent:end` 调用 |
 | `gateway/run_turn_runner.py` | stable tool lifecycle、answer/thinking delta、status、clarify、approval |
+| `gateway/run_turn_persistence.py`（v0.22.1+，可选） | completion（`GatewayTurnPersistenceMixin`） |
+| `gateway/run_turn_progress.py`（v0.22.1+，可选） | status（`GatewayTurnProgressMixin`，仍为 optional） |
 | `gateway/run_inbound.py` | command adapter 与 `_quick_key` 前的 HFC command |
 | `gateway/run_busy.py` | slash confirm |
 | `gateway/run_startup.py` | startup adapter 与 ledger redelivery |
@@ -33,6 +35,40 @@ clarify 的缝合点在 Hermes `242ff24ff7`（2026-09-16）后随 `_clarify_call
 该 helper 的契约是 `(response, answered)` 且调用方会解包，因此它的 hook 返回
 `(answer, True)`；helper 存在但上下文绑定或 `question` / `choices` / `multi_select`
 签名漂移、helper 改为 async 或 callback 不再解包二元返回值时拒绝安装，不留下半注入状态。单问与批问都经过该 helper，一张卡对应一个问题。
+
+## v0.22.1 拆分 mixin（#428）
+
+Hermes `297552a9d6`（v0.22.1）及其后的 main 把 `run_turn.py` / `run_turn_runner.py`
+中的部分方法拆进 mixin：`_hmwa_post_turn_hooks` 与 `_hmwa_deliver_turn_response`
+移到 `gateway/run_turn_persistence.py` 的 `GatewayTurnPersistenceMixin`；
+`_status_callback_sync` 移到 `gateway/run_turn_progress.py` 的 `GatewayTurnProgressMixin`；
+`TurnRunner._approval_notify_sync` 变成包装函数（generation 检查 → `_render_approval_sync`
+→ 本地 viewer `register_approval`），原方法体与 `ctx = self._ctx` 绑定一起移到
+`_render_approval_sync`。provider/model 采集所在的 `run_sync` 主体也移到 `_run_sync_scoped`。
+
+这些都只是回退路径（`install/split_turn_contracts.py`）：原单类锚点存在时完全不参与，
+v0.22.0 / v0.22.2 等布局的注入结果逐字节不变。拆分锚点必须跨文件同时成立：
+
+- completion：handler 所在类显式继承、且以唯一未别名的
+  `from gateway.run_turn_persistence import GatewayTurnPersistenceMixin` 导入该 mixin；
+  handler 内对两个 seam 的调用与原契约完全相同（先 post-hook 后 return，各一次，文件内
+  无其他调用点），handler 类自身不再定义同名方法；mixin 中两方法签名精确、均为 async、
+  模块内唯一，`agent:end` emit 恰好一次。任一条件不满足即 unsupported，渲染器也不会只在
+  mixin 中注入。调用方耗时 `_turn_seconds` 仍在 `run_turn.py` 传递。
+- status：`TurnRunner` 显式继承从 `gateway.run_turn_progress` 导入的 mixin，自身不再定义
+  `_status_callback_sync`；未验证时该文件被托管但不注入，保持 optional/partial。
+- approval：包装函数与 `_render_approval_sync` 都是 `(self, approval_data)` 的直接方法；包装
+  函数直接体内恰好一条 `self._render_approval_sync(approval_data)`，类内没有其他调用点，
+  渲染函数以 `ctx = self._ctx` 绑定上下文。hook 注入在该绑定之后，与原生发卡位置相同：
+  generation 检查仍先执行，HFC 用原始 request_id 解决审批后只是跳过原生渲染，包装函数随后的
+  `register_approval` 仍照常执行。由于审批条目在调用 notify 前已入队，并且
+  `resolve_gateway_approval` 按 request_id 出队，viewer 侧下一次 `snapshot` 会把该提示标记为
+  settled，迟到的 viewer 响应得到 `already_resolved`，不会二次解决或复活审批。
+
+两个新文件只在存在时纳入 manifest（版本仍为 4）。从已安装的 v0.22.0 升级到拆分布局时，
+仅接受这两个精确文件名、无 HFC marker、无 backup 的新增文件，并按兼容上游源码更新处理，
+仍需显式 `--accept-hermes-upgrade`；其他目标集合变化继续拒绝。从拆分布局降级回单文件布局
+（文件被删除）仍按目标集合变化拒绝，需先 uninstall 再安装。
 
 ## Exact Base 边界
 
@@ -118,6 +154,9 @@ Docker 建议依次完成：安装 HFC 包与 hook、必要的完整性迁移、
 `tests/fixtures/hermes_decomposed/` 包含 8 个注入目标和两个 facade，无凭据、无运行环境。
 `tests/unit/test_decomposed_patcher.py` 验证 CLI install/uninstall、重复安装、LF/CRLF
 及无末尾换行的逐字往返、事务回滚、拒绝漂移、版本复核与生成 hook 的实际执行。
+`tests/fixtures/hermes_decomposed_split/` 与 `tests/unit/test_split_turn_patcher.py` 覆盖 v0.22.1
+拆分 mixin：注入位置、单类布局输出与回退无关、跨文件契约漂移拒绝、status 可选、hook 实际执行、
+审批包装顺序、升级与未托管证据拒绝。
 `tests/fixtures/hermes_extracted_clarify.py` 与 `tests/unit/test_extracted_clarify_patcher.py`
 覆盖抽取后的 clarify 缝合点：注入位置、元组返回值、重复安装、逐字还原、上下文绑定与
 参数漂移拒绝、hook 实际执行与无应答时的原生回退。
@@ -147,3 +186,7 @@ provisioning，不启动 Hermes 服务、不使用飞书凭据。CI 在 Python 3
 检出上述固定提交执行此门禁；本地可通过 `HFC_UPSTREAM_STABLE_ROOT` 和
 `HFC_UPSTREAM_MAIN_ROOT` 提供对应源码。缺少源码会明确 skip，不能计为兼容验证通过。
 上游之后的提交需要重新验证，不以“最新版”标签替代固定源码证据。
+
+2026-10-15 追加固定源码：`split_stable` = v0.22.1 `297552a9d646119871391d202509822cd86330df`，
+`split_main` = main `ecac27c0af86064c40eeb8097cc20377cf2eee12`，均为拆分 mixin 布局，
+通过 `HFC_UPSTREAM_SPLIT_STABLE_ROOT` / `HFC_UPSTREAM_SPLIT_MAIN_ROOT` 提供。

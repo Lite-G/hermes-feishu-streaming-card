@@ -4,8 +4,10 @@ import textwrap
 
 from .source_layout import (
     DECOMPOSED_GATEWAY_TARGETS as DECOMPOSED_GATEWAY_TARGETS,
+    DECOMPOSED_SPLIT_TURN_TARGETS as DECOMPOSED_SPLIT_TURN_TARGETS,
     DECOMPOSED_TARGETS as DECOMPOSED_TARGETS,
 )
+from . import split_turn_contracts
 from . import stop_cancellation
 from .gateway_contracts import find_stale_interrupted_location
 from .cron_contracts import (
@@ -1700,6 +1702,13 @@ def _find_turn_runner_callback_body_location(
             if isinstance(node, ast.FunctionDef) and node.name == callback_name
         ]
     else:
+        if callback_name == "_approval_notify_sync":
+            # Hermes 297552a9d6+: the wrapper delegates to _render_approval_sync,
+            # which now owns the ctx binding. Fallback only; see split_turn_contracts.
+            renderer = split_turn_contracts.find_delegated_approval_renderer(turn_runner)
+            if (renderer is not None and _binds_turn_context(renderer)
+                    and set(required_callback_args).issubset(_function_argument_names(renderer))):
+                return _turn_context_binding_location(renderer, lines)
         run_sync = _find_direct_class_function_node(turn_runner, "_setup_stream_consumer")
         if run_sync is not None:
             callback_name = {"_stream_delta_cb": "stream_delta_cb", "_interim_assistant_cb": "interim_assistant_cb"}.get(callback_name, callback_name)
@@ -4056,8 +4065,12 @@ DECOMPOSED_LAYOUT_MARKERS = {
 
 def apply_gateway_fragment(content: str, target: str, *, strategy="gateway_run_013_plus") -> str:
     """Render one routed legacy fragment; never infer an integration mode."""
-    if target not in ("gateway/run.py", *DECOMPOSED_GATEWAY_TARGETS):
+    if target not in ("gateway/run.py", *DECOMPOSED_GATEWAY_TARGETS, *DECOMPOSED_SPLIT_TURN_TARGETS):
         raise ValueError("unknown Gateway patch target")
+    if target == split_turn_contracts.PERSISTENCE_TARGET:
+        return _apply_split_complete_patch(content)
+    if target == split_turn_contracts.PROGRESS_TARGET:
+        return _apply_split_status_patch(content, strategy=strategy)
     tree = _parse_content(content)
     if _find_handler_node(tree) is not None:
         content = _apply_start_patch(content, strategy=strategy)
@@ -4075,6 +4088,54 @@ def apply_gateway_fragment(content: str, target: str, *, strategy="gateway_run_0
                   _apply_native_redelivery_patch, _apply_platform_notice_patch):
         content = apply(content)
     return _apply_turn_callbacks(content, strategy=strategy)
+
+
+def _apply_split_complete_patch(content: str) -> str:
+    """Completion hook inside GatewayTurnPersistenceMixin (Hermes v0.22.1+ split).
+
+    Only the per-file shape is checked here; the caller-side contract in
+    gateway/run_turn.py is enforced across files by detect and by the
+    decomposed renderer before anything is written.
+    """
+    if _find_owned_complete_block(content) is not None:
+        content = _remove_complete_patch(content)
+    tree = _parse_content(content)
+    delivery = split_turn_contracts.find_split_completion_delivery(tree)
+    if delivery is None:
+        return content
+    lines = content.splitlines(keepends=True)
+    location = _find_already_sent_early_return_location(delivery, lines)
+    if location is None:
+        returns = [node for node in ast.walk(delivery) if isinstance(node, ast.Return)
+                   and isinstance(getattr(node, "value", None), ast.Name)
+                   and node.value.id == "response"]
+        if not returns:
+            return content
+        insert_at = max(returns, key=lambda node: node.lineno).lineno - 1
+        location = insert_at, _line_indent(lines, insert_at)
+    insert_at, indent = location
+    hook = _render_decomposed_complete_hook_block(indent, _detect_newline(content))
+    return "".join(lines[:insert_at] + hook + lines[insert_at:])
+
+
+def _apply_split_status_patch(content: str, *, strategy: str) -> str:
+    """Optional status hook inside GatewayTurnProgressMixin (Hermes v0.22.1+ split)."""
+    owned = _find_simple_marker_block(content, STATUS_PATCH_BEGIN, STATUS_PATCH_END,
+                                      "callback patch markers")
+    if owned is not None:
+        lines = content.splitlines(keepends=True)
+        content = "".join(lines[:owned[0]] + lines[owned[1] + 1:])
+    if strategy != "gateway_run_013_plus":
+        return content
+    tree = _parse_content(content)
+    callback = split_turn_contracts.find_split_status_callback(tree)
+    lines = content.splitlines(keepends=True)
+    location = _turn_context_binding_location(callback, lines) if callback is not None else None
+    if location is None:
+        return content
+    insert_at, indent = location
+    hook = _render_turn_context_hook_block(_render_status_hook_block, indent, _detect_newline(content))
+    return "".join(lines[:insert_at] + hook + lines[insert_at:])
 
 
 def _find_startup_boot_send(func):
@@ -4203,7 +4264,8 @@ def _apply_turn_timing_patch(content):
     content = _remove_simple_owned_patch(content, TURN_TIMING_PATCH_BEGIN, TURN_TIMING_PATCH_END,
                                          _render_turn_timing_hook_block, "turn timing patch markers")
     tree = _parse_content(content)
-    if _find_decomposed_completion_node(tree) is None:
+    if (_find_decomposed_completion_node(tree) is None
+            and not split_turn_contracts.split_completion_caller_verified(content)):
         return content
     handler = _find_handler_node(tree)
     if "_turn_seconds" not in _function_scope_names(handler):

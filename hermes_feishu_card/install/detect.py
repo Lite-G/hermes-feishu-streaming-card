@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from . import patcher
+from . import patcher, split_turn_contracts
 from .native_hooks import (
     FIXED_TAG_COMMIT,
     NativeHookCapabilityProbe,
@@ -193,7 +193,7 @@ def detect_hermes(root: str | Path) -> HermesDetection:
         return result(False, run_py_error)
 
     gateway_sources["gateway/run.py"] = contents
-    for name in patcher.DECOMPOSED_GATEWAY_TARGETS:
+    for name in (*patcher.DECOMPOSED_GATEWAY_TARGETS, *patcher.DECOMPOSED_SPLIT_TURN_TARGETS):
         path = hermes_root / name
         if path.is_symlink():
             return result(False, f"{name} must not be a symlink")
@@ -902,6 +902,15 @@ _LAYOUT_MARKERS = patcher.DECOMPOSED_LAYOUT_MARKERS
 def _detect_layout_capabilities(sources, cron_contents, cron_target):
     locations = {name: [] for name in (*_LAYOUT_MARKERS, "run_agent", "reply_context", "attachment_delivery", "cron_delivery")}
     errors = []
+    # Hermes v0.22.1+ split mixins: verify the caller/owner pair across files.
+    clean_sources = {}
+    for target, content in sources.items():
+        try:
+            clean_sources[target] = patcher.remove_patch(content)
+        except ValueError:
+            pass
+    split_completion = split_turn_contracts.split_completion_verified(clean_sources)
+    split_status = split_turn_contracts.split_status_verified(clean_sources)
     for target, content in sources.items():
         try:
             clean = patcher.remove_patch(content)
@@ -909,6 +918,13 @@ def _detect_layout_capabilities(sources, cron_contents, cron_target):
             rendered = patcher.apply_gateway_fragment(clean, target)
             for name, marker in _LAYOUT_MARKERS.items():
                 if marker in rendered:
+                    if (target == split_turn_contracts.PERSISTENCE_TARGET and name == "completion_return"
+                            and not split_completion):
+                        errors.append(f"{target}: split completion caller contract missing")
+                        continue
+                    if (target == split_turn_contracts.PROGRESS_TARGET and name == "status_callback"
+                            and not split_status):
+                        continue  # optional; an unverified owner stays unpatched
                     locations[name].append(target)
             if _find_run_agent(tree) is not None:
                 locations["run_agent"].append(target)
@@ -921,7 +937,8 @@ def _detect_layout_capabilities(sources, cron_contents, cron_target):
                    for node in ast.walk(tree)):
                 locations["attachment_delivery"].append(target)
             handler = patcher._find_handler_node(tree)
-            if handler is not None and patcher._find_decomposed_completion_node(tree) is None:
+            if (handler is not None and patcher._find_decomposed_completion_node(tree) is None
+                    and not (target == split_turn_contracts.HANDLER_TARGET and split_completion)):
                 errors.append(f"{target}: decomposed completion/agent:end contract missing")
         except (ValueError, SyntaxError) as exc:
             errors.append(f"{target}: unsafe anchors or ownership ({exc})")

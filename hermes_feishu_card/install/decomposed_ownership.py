@@ -16,6 +16,7 @@ from .source_layout import (
     BACKUP_SUFFIX, MANIFEST_NAME,
     DECOMPOSED_MANIFEST_VERSION as MANIFEST_VERSION,
     DECOMPOSED_SOURCE_TARGETS as SOURCE_TARGETS,
+    DECOMPOSED_SPLIT_TURN_TARGETS,
 )
 
 VERSION_TARGETS = ("VERSION", "hermes_cli/__init__.py", ".git/HEAD", ".git/packed-refs")
@@ -68,6 +69,7 @@ def _fingerprint(snapshot: Mapping[str, bytes | None]) -> str:
 
 def render(sources: Mapping[str, bytes], strategy: str = "gateway_run_013_plus") -> dict[str, bytes]:
     rendered = {}
+    split_unverified = _unverified_split_turn_targets(sources)
     for target, raw in sources.items():
         text = raw.decode("utf-8")
         if target == "gateway/platforms/base.py":
@@ -76,6 +78,10 @@ def render(sources: Mapping[str, bytes], strategy: str = "gateway_run_013_plus")
         elif target.startswith("cron/"):
             patched = patcher.apply_cron_patch(text)
             restored = patcher.remove_cron_patch(patched)
+        elif target in split_unverified:
+            # Hermes v0.22.1+ mixin without its verified caller: own the file
+            # (so restore stays exact) but inject nothing into it.
+            patched = restored = text
         else:
             patched = patcher.apply_gateway_fragment(text, target, strategy=strategy)
             restored = patcher.remove_patch(patched)
@@ -93,6 +99,16 @@ def render(sources: Mapping[str, bytes], strategy: str = "gateway_run_013_plus")
         if all_bytes.count(marker.encode()) != 1:
             raise ValueError("decomposed delivery patch group missing or ambiguous")
     return rendered
+
+
+def _unverified_split_turn_targets(sources: Mapping[str, bytes]) -> set[str]:
+    """Split mixin files whose caller/owner contract is not verified across files."""
+    from . import split_turn_contracts as split
+    texts = {name: raw.decode("utf-8") for name, raw in sources.items()
+             if name in (split.HANDLER_TARGET, split.RUNNER_TARGET, *split.SPLIT_TURN_TARGETS)}
+    checks = ((split.PERSISTENCE_TARGET, split.split_completion_verified),
+              (split.PROGRESS_TARGET, split.split_status_verified))
+    return {target for target, verified in checks if target in texts and not verified(texts)}
 
 
 def snapshot_provenance(originals: Mapping[str, bytes], rendered: Mapping[str, bytes]) -> dict[str, Any]:
@@ -221,7 +237,15 @@ def _inspect(root: Path, *, render_hooks: bool = True) -> tuple[dict[str, bytes 
         originals = _legacy_upgrade_sources(snapshot, sources, manifest)
         return snapshot, originals, render(originals) if render_hooks else None, "stale_unpatched"
     validate_manifest(manifest)
-    if set(manifest["targets"]) != set(sources):
+    # A Hermes upgrade into the v0.22.1+ split layout adds optional mixin files
+    # that an earlier manifest cannot own yet. Accept only those exact,
+    # marker-free, backup-free additions as unowned upgraded source; they are
+    # handled like any other compatible upstream replacement below.
+    added = set(sources) - set(manifest["targets"])
+    if set(manifest["targets"]) - set(sources) or not added <= set(DECOMPOSED_SPLIT_TURN_TARGETS):
+        raise ValueError("decomposed source target set changed")
+    if any(b"HERMES_FEISHU_CARD_" in sources[name] or snapshot[name + BACKUP_SUFFIX] is not None
+           for name in added):
         raise ValueError("decomposed source target set changed")
     originals = {}
     for target, row in manifest["targets"].items():
@@ -236,7 +260,11 @@ def _inspect(root: Path, *, render_hooks: bool = True) -> tuple[dict[str, bytes 
     clean_targets = []
     replacements = {}
     reapplied = False
+    for target in sorted(added):
+        replacements[target] = sources[target]
     for target, raw in sources.items():
+        if target in added:
+            continue
         row = manifest["targets"][target]
         if sha256(raw).hexdigest() == row["patched_sha256"]:
             # The manifest binds the entire installed file to its verified
