@@ -945,22 +945,29 @@ def wait_for_owned_clarify(
     runtime = None
     values = None
     correlation = None
+    tool_observation = None
     try:
         values = _thin_interaction_values(
             local_vars, "clarify", interaction_data, pending_handle,
         )
         from tools import approval
-        if (values is not None
-                and approval._approval_session_key.get() == values[1]
-                and approval._approval_turn_id.get() == values[2]):
+        if values is not None and approval._approval_session_key.get() == values[1]:
             runtime = _plugin_runtime()
             correlation = (
                 approval._approval_session_key.get(), approval._approval_turn_id.get(),
                 approval._approval_tool_call_id.get(),
             )
-            observer = runtime.clarify_timeout_observer(
-                *values[1:], correlation[2], timeout,
-            )
+            call = correlation[2]
+            if correlation[1:] == ("", ""):
+                # Hermes' specialized clarify executor bypasses the generic
+                # dispatcher's approval ContextVars. Require its exact official
+                # pre-tool observation on this execution thread and handle.
+                tool_observation = runtime.clarify_tool_call_for_wait(*values[1:])
+                call = None if tool_observation is None else tool_observation.tool_call_id
+            elif correlation[1] != values[2]:
+                call = None
+            if call:
+                observer = runtime.clarify_timeout_observer(*values[1:], call, timeout)
     except Exception:
         observer = None
     # Deliberately outside the observer guard: owned wait failures propagate.
@@ -973,7 +980,10 @@ def wait_for_owned_clarify(
                 )
                 and _thin_interaction_values(
                     local_vars, "clarify", interaction_data, pending_handle,
-                ) == values):
+                ) == values
+                and (tool_observation is None or runtime.clarify_tool_call_is_current(
+                    values[1], values[2], tool_observation,
+                ))):
             observer(response)
     except Exception:
         pass

@@ -362,6 +362,15 @@ class IngressBinding:
 
 
 @dataclass
+class _ClarifyToolObservation:
+    tool_call_id: str
+    thread_id: int
+    fingerprint: str
+    active: bool = True
+    ambiguous: bool = False
+
+
+@dataclass
 class TurnBinding:
     ingress: IngressBinding
     turn_id: str
@@ -369,6 +378,7 @@ class TurnBinding:
     # Display-only outcomes from matched original interaction callbacks, never authority.
     _approval_tool_outcomes: dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
     _approval_outcome_overflow: bool = field(default=False, init=False, repr=False, compare=False)
+    _clarify_tool_calls: dict[str, _ClarifyToolObservation] = field(default_factory=dict, init=False, repr=False, compare=False)
     metrics: TurnMetrics | None = field(default=None, init=False, repr=False, compare=False)
     _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
 
@@ -1104,6 +1114,86 @@ class PluginRuntime:
         except Exception:
             return None
 
+    def _record_clarify_tool_call(self, kwargs: dict[str, object]) -> None:
+        if kwargs.get("tool_name") != "clarify":
+            return
+        args = kwargs.get("args")
+        call = kwargs.get("tool_call_id")
+        if (type(args) is not dict or not self._exact_nonblank(call)
+                or not self._exact_nonblank(kwargs.get("turn_id"))):
+            return
+        question = args.get("question")
+        choices = args.get("choices")
+        multiple = args.get("multi_select", False)
+        # Only the canonical tool's unambiguous string inputs are recognized.
+        # Unsupported choice shapes keep the existing unknown/fail-open display.
+        if (type(question) is not str or not question.strip() or type(multiple) is not bool
+                or (choices is not None and (type(choices) is not list
+                    or any(type(choice) is not str for choice in choices)))):
+            return
+        offered = [choice.strip() for choice in (choices or []) if choice.strip()][:4]
+        fingerprint = sha256((question.strip() + "\0" + repr(offered)
+                              + "\0" + str(multiple)).encode("utf-8")).hexdigest()
+        observation = _ClarifyToolObservation(call, threading.get_ident(), fingerprint)
+        with self._lock:
+            turn = self._turns.get(kwargs.get("turn_id"))
+            if (self._closed or turn is None or not turn.accepts_observer_events
+                    or kwargs.get("session_id") != turn.ingress.session_id
+                    or self._card_active_coordinator_locked(turn.turn_id) is None):
+                return
+            calls = turn._clarify_tool_calls
+            if call in calls:
+                current = calls[call]
+                if (current.thread_id != observation.thread_id
+                        or current.fingerprint != observation.fingerprint):
+                    current.ambiguous = True
+                return
+            if len(calls) >= 128:
+                return
+            # A nested/overlapping call on one execution thread is ambiguous.
+            overlapping = [key for key, value in calls.items()
+                           if value.active and value.thread_id == observation.thread_id]
+            for key in overlapping:
+                calls[key].ambiguous = True
+            observation.ambiguous = bool(overlapping)
+            calls[call] = observation
+
+    def clarify_tool_call_for_wait(
+        self, session_identity, turn_id, interaction_id, fingerprint, pending_handle,
+    ):
+        """Read an exact official pre-tool observation, never choose a recent call."""
+        with self._lock:
+            key = self._patch_interaction_key_locked(
+                "clarify", session_identity, turn_id, interaction_id, fingerprint,
+            )
+            state = self._patch_interactions.get(key)
+            turn = self._turns.get(turn_id)
+            if (self._closed or turn is None or not turn.accepts_observer_events
+                    or turn.ingress.gateway_session_key != session_identity
+                    or type(state) is not _PatchInteraction or not state.hfc_owned
+                    or state.pending_handle is not pending_handle
+                    or state.turn_digest in self._interaction_cleanup_turns
+                    or self._card_active_coordinator_locked(turn_id) is None):
+                return None
+            matches = [value for value in turn._clarify_tool_calls.values()
+                       if value.active and not value.ambiguous
+                       and value.thread_id == threading.get_ident()
+                       and value.fingerprint == fingerprint]
+            return matches[0] if len(matches) == 1 else None
+
+    def clarify_tool_call_is_current(self, session_identity, turn_id, observation):
+        with self._lock:
+            turn = self._turns.get(turn_id)
+            return (
+                not self._closed and turn is not None and turn.accepts_observer_events
+                and turn.ingress.gateway_session_key == session_identity
+                and self._card_active_coordinator_locked(turn_id) is not None
+                and type(observation) is _ClarifyToolObservation
+                and observation.thread_id == threading.get_ident()
+                and observation.active and not observation.ambiguous
+                and turn._clarify_tool_calls.get(observation.tool_call_id) is observation
+            )
+
     def clarify_timeout_observer(
         self, session_identity, turn_id, interaction_id, fingerprint,
         pending_handle, tool_call_id, timeout,
@@ -1772,11 +1862,34 @@ class PluginRuntime:
         return None
 
     def handle_pre_tool_call(self, **kwargs: object) -> None:
+        self._record_clarify_tool_call(kwargs)
         self._submit_tool(kwargs, pending=True)
         return None
 
     def handle_post_tool_call(self, **kwargs: object) -> None:
-        self._submit_tool(kwargs, pending=False)
+        if not all(self._exact_nonblank(kwargs.get(key))
+                   for key in ("turn_id", "tool_call_id", "tool_name")):
+            return None
+        with self._lock:
+            turn = self._turns.get(kwargs.get("turn_id"))
+            known = None if turn is None else turn._clarify_tool_calls.get(kwargs.get("tool_call_id"))
+            if (known is not None and (kwargs.get("tool_name") != "clarify"
+                    or kwargs.get("session_id") != turn.ingress.session_id
+                    or known.thread_id != threading.get_ident())):
+                return None
+        try:
+            self._submit_tool(kwargs, pending=False)
+        finally:
+            with self._lock:
+                turn = self._turns.get(kwargs.get("turn_id"))
+                if (turn is not None and kwargs.get("tool_name") == "clarify"
+                        and kwargs.get("session_id") == turn.ingress.session_id
+                        and kwargs.get("tool_call_id") in turn._clarify_tool_calls):
+                    # Keep a bounded tombstone: late/replayed pre-tool hooks must
+                    # not revive a completed observation after thread-id reuse.
+                    observation = turn._clarify_tool_calls[kwargs["tool_call_id"]]
+                    if observation.thread_id == threading.get_ident():
+                        observation.active = False
         return None
 
     def handle_pre_approval_request(self, **kwargs: object) -> None:
