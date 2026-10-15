@@ -15,7 +15,7 @@
 
 [快速安装](#快速安装) · [配置方法](#配置方法) · [近期更新](#近期更新) · [使用手册](docs/user-guide.md) · [贡献者](#贡献者)
 
-**发行版本：[v4.7.7](https://github.com/baileyh8/hermes-feishu-streaming-card/releases/tag/v4.7.7)。** 可选原生表格；长单元格完整回退 Markdown，超长表头不再丢失。见[发行说明](docs/release-notes-v4.7.7.md)。
+**发行版本：[v5.0.0](https://github.com/baileyh8/hermes-feishu-streaming-card/releases/tag/v5.0.0)。** 任务分区阅读、交互续答和本轮统计；安装与恢复保留原有权限和来源校验。见[发行说明](docs/release-notes-v5.0.0.md)。
 
 本开发分支正在验收新版任务布局、已加载配置对照、精简 YAML 和本地脱敏报告，尚未发布。范围与证据见[重构升级记录](docs/plans/2026-10-13-refactor-upgrade.md)。
 
@@ -82,7 +82,7 @@ python3 -m hermes_feishu_card.cli doctor --config ~/.hermes/config.yaml --hermes
 - **Docker：** 在已有 Hermes 容器中，使用仓库内的安装脚本：
 
 ```bash
-export FEISHU_APP_ID=cli_xxx FEISHU_APP_SECRET=xxx HFC_VERSION=v4.7.7
+export FEISHU_APP_ID=cli_xxx FEISHU_APP_SECRET=xxx HFC_VERSION=v5.0.0
 bash install-docker.sh
 ```
 
@@ -210,6 +210,7 @@ HFC 采用 **sidecar-only** 架构：Hermes 运行任务，安装器管理必要
 
 | 版本 | 重点 |
 |---|---|
+| [v5.0.0](docs/release-notes-v5.0.0.md) | 任务分区、交互续答、本轮统计与安装恢复边界 |
 | [v4.7.7](docs/release-notes-v4.7.7.md) | 可选原生表格；保留长单元格和无法拆分的 Markdown 表格 |
 | [v4.7.6](docs/release-notes-v4.7.6.md) | 分离 HOME 绑定、多实例身份校验与诊断修复 |
 | [v4.7.5](docs/release-notes-v4.7.5.md) | PM 环境绑定、私聊按钮准入修复及目录布局限制说明 |
@@ -219,7 +220,6 @@ HFC 采用 **sidecar-only** 架构：Hermes 运行任务，安装器管理必要
 | [v4.7.1](docs/release-notes-v4.7.1.md) | 命令确认回调修复与结果卡刷新 |
 | [v4.7.0](docs/release-notes-v4.7.0.md) | 任务布局、离线预览、额度归属与交互状态修复 |
 | [v4.6.13](docs/release-notes-v4.6.13.md) | 控制凭据移出命令行与最新 Hermes 源码验证 |
-| [v4.6.12](docs/release-notes-v4.6.12.md) | 可选卡片宽度与 Hermes 回复计时契约适配 |
 
 更早版本见[历史更新](docs/release-history.md)；完整记录见 [CHANGELOG](CHANGELOG.md) 与 [GitHub Releases](https://github.com/baileyh8/hermes-feishu-streaming-card/releases)。
 
