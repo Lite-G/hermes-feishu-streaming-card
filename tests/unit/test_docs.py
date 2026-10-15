@@ -211,7 +211,7 @@ def test_readme_documents_sidecar_only_and_supported_hermes_version():
     assert "img.shields.io/badge/Python-3.9%2B" in readme
     assert "img.shields.io/badge/Feishu%20%2F%20Lark-Streaming%20Cards" in readme
     assert "img.shields.io/badge/Runtime-Sidecar--only" in readme
-    assert "docs/assets/readme-cover.png" in readme
+    assert "docs/assets/readme-cover-v5.png" in readme
     assert "docs/assets/feishu-card-showcase-v385.png" in readme
     assert "docs/assets/feishu-topic-card-showcase-v389.png" not in readme
     assert "docs/assets/feishu-topic-card-showcase-v389.png" not in readme_en
@@ -240,7 +240,7 @@ def test_readme_documents_sidecar_only_and_supported_hermes_version():
     assert "Git tag `v2026.4.23+`" in guide
     assert (
         "</p>\n\n"
-        "![Hermes Feishu Streaming Card 封面](docs/assets/readme-cover.png)"
+        "![Hermes Feishu Streaming Card 封面](docs/assets/readme-cover-v5.png)"
     ) in readme
 
 
@@ -302,7 +302,7 @@ def test_readmes_preserve_historical_pr_issue_and_commit_credits():
         "Never fabricate",
     ):
         assert marker in agents
-    assert (ROOT / "docs/assets/readme-cover.png").exists()
+    assert (ROOT / "docs/assets/readme-cover-v5.png").exists()
     assert (ROOT / "docs/assets/feishu-card-showcase-v385.png").exists()
     assert (ROOT / "docs/assets/feishu-weather-card.png").exists()
     assert "V3.6.6" in guide
@@ -726,7 +726,7 @@ def test_english_readme_and_docs_are_linked():
     assert "Why HFC" in english_readme
     assert "Configuration" in english_readme
     assert "img.shields.io/github/stars/baileyh8/hermes-feishu-streaming-card" in english_readme
-    assert "docs/assets/readme-cover.png" in english_readme
+    assert "docs/assets/readme-cover-v5.png" in english_readme
     assert "docs/assets/feishu-card-showcase-v385.png" in english_readme
     assert "PR #76" in english_readme
     assert "PR #87" in english_readme
@@ -3517,7 +3517,8 @@ def test_readmes_keep_onboarding_concise_and_references_reachable():
         assert [text.index(h) for h in headings] == sorted(text.index(h) for h in headings)
         overview = text[:text.index(headings[1])]
         assert "V4.1" not in overview
-        assert "reading_preset: focused" in text
+        assert "reading_preset: task" in text
+        assert "timeline_expanded: false" in text
         assert f"]({history})" in text
         recent = text.split(headings[3], 1)[1].split(headings[4], 1)[0]
         assert len(re.findall(r"^\| \[v[0-9]", recent, re.M)) <= 10

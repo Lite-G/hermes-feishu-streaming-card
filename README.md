@@ -5,7 +5,7 @@
 <a href="https://github.com/baileyh8/hermes-feishu-streaming-card/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/baileyh8/hermes-feishu-streaming-card?style=for-the-badge&logo=github&label=Stars&color=2f80ed"></a> <a href="https://github.com/baileyh8/hermes-feishu-streaming-card/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/baileyh8/hermes-feishu-streaming-card?style=for-the-badge&logo=githubactions&label=Release&color=22c55e"></a> <a href="https://github.com/baileyh8/hermes-feishu-streaming-card/actions/workflows/tests.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/baileyh8/hermes-feishu-streaming-card/tests.yml?branch=main&style=for-the-badge&label=Tests&logo=githubactions"></a> <img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white"> <img alt="Feishu/Lark" src="https://img.shields.io/badge/Feishu%20%2F%20Lark-Streaming%20Cards-00D6B4?style=for-the-badge"> <img alt="Sidecar only" src="https://img.shields.io/badge/Runtime-Sidecar--only-7C3AED?style=for-the-badge"> <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/baileyh8/hermes-feishu-streaming-card?style=for-the-badge&color=64748b"></a>
 </p>
 
-![Hermes Feishu Streaming Card 封面](docs/assets/readme-cover.png)
+![Hermes Feishu Streaming Card 封面](docs/assets/readme-cover-v5.png)
 
 **在飞书里，看见 Hermes 正在做什么，直接确认下一步，完整读到最终答案。**
 
@@ -13,11 +13,33 @@
 
 它适合已经在使用、或准备把 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 接入飞书的用户。模型、工具和任务仍由 Hermes 执行，HFC 负责卡片展示、交互和投递。
 
-[快速安装](#快速安装) · [配置方法](#配置方法) · [近期更新](#近期更新) · [使用手册](docs/user-guide.md) · [贡献者](#贡献者)
+[V5 新变化](#v5-新变化) · [从 V4x 升级](#从-v4x-升级到-v5) · [快速安装](#快速安装) · [配置方法](#配置方法) · [近期更新](#近期更新) · [使用手册](docs/user-guide.md) · [贡献者](#贡献者)
 
-**发行版本：[v5.0.0](https://github.com/baileyh8/hermes-feishu-streaming-card/releases/tag/v5.0.0)。** 任务分区阅读、交互续答和本轮统计；安装与恢复保留原有权限和来源校验。见[发行说明](docs/release-notes-v5.0.0.md)。
+**V5：任务看得清，交互接得上，结果留得全。** 本页介绍 v5.0.0；可安装版本以 [GitHub Releases](https://github.com/baileyh8/hermes-feishu-streaming-card/releases) 为准。见[完整发行说明](docs/release-notes-v5.0.0.md)。
 
-本开发分支正在验收新版任务布局、已加载配置对照、精简 YAML 和本地脱敏报告，尚未发布。范围与证据见[重构升级记录](docs/plans/2026-10-13-refactor-upgrade.md)。
+## V5 新变化
+
+V5 重新整理了从任务开始、等待确认到输出最终答案的阅读流程。普通问答保持原卡；需要你操作时保留选择回执，续答送达后再收起旧段。
+
+| 变化 | 你会看到什么 |
+| --- | --- |
+| **任务分区** | 状态、正文、执行过程与统计各有位置；长回答优先保留完整内容，过程可展开回看 |
+| **交互续答** | 审批、单选、多选和文本输入继续使用 Hermes 原有流程；有可靠目标时，旧卡出现“查看续答” |
+| **明确结果** | 拒绝显示“已拒绝”，自然超时显示“已超时”；过期后保留问题与选项记录，撤下操作按钮 |
+| **本轮统计** | 底部显示实际取得的模型、用时、输入/输出 token 与上下文用量；缺失字段不编造数值 |
+| **配置可核对** | 对照“进程已加载”和“下次加载”的值，生成精简 YAML，先离线预览再调整 |
+
+安装、恢复、事件处理与卡片渲染的职责也做了拆分。Hermes 继续负责模型与工具执行，HFC 不改变授权决定。卡片明确接管后减少重复原生文本；附件与无法确认送达的路径仍保留必要回退。
+
+**想直接使用 V5 任务布局：** 在现有配置的全局 `card` 下合并这两个字段，然后重启 sidecar。不要覆盖整份配置；profile / bot 的显式值仍可能覆盖全局设置。
+
+```yaml
+card:
+  reading_preset: task
+  timeline_expanded: false
+```
+
+这组设置让执行过程默认收起，完成后仍可展开。`task` 预设本身默认展开；第二行明确选择收起。升级不会自动把 `classic`、`focused` 或 `detailed` 改成 `task`。
 
 ## 为什么使用 HFC
 
@@ -34,22 +56,47 @@
 
 ## 看看实际效果
 
-| 运行中：当前动作与过程 | 等待：直接在卡片操作 |
-| --- | --- |
-| ![运行态](docs/assets/feishu-v4-runtime-running.png) | ![等待态](docs/assets/feishu-v4-runtime-waiting.png) |
+封面是 AI 生成的 V5 宣传视觉，不是产品截图。真实流程是：任务流式更新 → 等待你的选择 → 记录操作 → 继续输出 → 完整结果与本轮统计。
+
+V5 的桌面验收已核对“已超时”状态、失效选项和“查看续答”实际跳转；此前的桌面交互及手机显示也分别记录。客户端、主题和配置会影响外观，验收范围见[飞书验收清单](docs/wiki/feishu-acceptance.md)。
 
 <details>
-<summary>展开查看失败、完成与命令交互示例</summary>
+<summary>查看 V4.x 真实界面参考（历史版本）</summary>
 
-| 失败：保留已有内容 | 完成：阅读最终答案 |
+| 运行中 | 等待操作 |
 | --- | --- |
-| ![失败态](docs/assets/feishu-v4-runtime-failed.png) | ![完成态](docs/assets/feishu-v4-runtime-completed.png) |
+| ![V4 运行态](docs/assets/feishu-v4-runtime-running.png) | ![V4 等待态](docs/assets/feishu-v4-runtime-waiting.png) |
 
-![命令交互与工具记录](docs/assets/feishu-card-showcase-v385.png)
+| 失败 | 完成 |
+| --- | --- |
+| ![V4 失败态](docs/assets/feishu-v4-runtime-failed.png) | ![V4 完成态](docs/assets/feishu-v4-runtime-completed.png) |
+
+![历史命令交互与工具记录](docs/assets/feishu-card-showcase-v385.png)
+
+以上为历史版本真实截图，不代表 V5 的每一项布局细节。
 
 </details>
 
-截图来自已发布版本的真实飞书验收；不同客户端、版本与配置的外观可能不同。
+## 从 V4.x 升级到 V5
+
+**已有机器人不必重新创建。** 沿用实际 Hermes 目录、配置文件、凭据文件和 profile；不要把示例路径直接套到分离 HOME、Docker 或多实例环境。
+
+1. 记下当前 HFC / Hermes 版本及服务启动方式，备份现有配置、`.env` 和安装器恢复资料。等任务结束，使用原服务管理器停止 Gateway、Desktop 和 sidecar。
+2. 使用下面的安装脚本固定安装 `v5.0.0`，继续传入原来的配置与凭据路径。只有该 tag 正式发布后才执行；安装器会检查旧安装的来源与兼容性。
+3. 如果诊断要求先恢复旧 hook，按其给出的官方 `restore` 命令处理后重装。未知源码漂移应停止并排查，不手改 `gateway/run.py`，不删除 manifest 或 backup 强行继续。
+4. 需要新版任务布局时合并上面的两行配置；其余凭据、路由、原生表格和阅读预设按原配置保留。
+5. 按安装输出恢复原服务管理器，重启 Gateway / Desktop，运行 `status`、`doctor --explain` 和 `card-config --running`，再给机器人发一条消息确认卡片和 footer。
+
+macOS / Linux 示例（先把路径改为你当前安装所用的值）：
+
+```bash
+export HERMES_DIR="$HOME/.hermes/hermes-agent"
+export HFC_CONFIG="$HOME/.hermes/config.yaml"
+export HFC_ENV_FILE="$HOME/.hermes/.env"
+curl -fsSL https://raw.githubusercontent.com/baileyh8/hermes-feishu-streaming-card/v5.0.0/install.sh | bash -s -- --version v5.0.0 --config "$HFC_CONFIG" --env-file "$HFC_ENV_FILE"
+```
+
+Windows、Docker、分离 HOME 的完整步骤，以及验证与回退方法，见 **[V4.x → V5 升级指南](docs/upgrade-v4-to-v5.md)**。升级 HFC 与升级 Hermes 是两件事；飞书 `/update` 不能当作本插件的版本升级命令。
 
 ## 快速安装
 
@@ -150,7 +197,8 @@ FEISHU_HOME_CHANNEL=oc_xxx
 
 ```yaml
 card:
-  reading_preset: focused
+  reading_preset: task
+  timeline_expanded: false
 ```
 
 | 预设 | 适合的阅读方式 |
@@ -158,13 +206,13 @@ card:
 | 缺省 / `classic` | 保持现有展示方式，过程面板折叠 |
 | `focused` | 重点看答案；思考放在面板，正常完成后精简成功工具行 |
 | `detailed` | 展开思考与工具过程，便于追踪任务 |
-| `task`（4.7.0 起） | 状态和动作分区、正文优先；本开发分支过程默认展开，完成后保留历史 |
+| `task`（4.7.0 起） | 状态和动作分区、正文优先；V5 过程默认展开，完成后保留历史 |
 
 4.7.0 新增可选 `task` 布局与九种状态的离线预览。启用方式、配置来源和回退见[任务卡片](docs/task-cards.md)。订阅周额度仅在实际使用 `openai-codex` 的 GPT 回合显示，其他模型或来源不明时隐藏。
 
 同层显式字段优先于预设。若从完整示例复制了旧显示开关，预设可能被覆盖；用 `hermes-feishu-card card-config --config <配置路径>` 检查有效值，重启 sidecar 后生效。更多选项见[阅读预设](docs/wiki/reading-presets.md)。
 
-开发分支还可追加 `--running` 核对进程已加载值，或用 `--minimal-yaml` 生成所选层的精简阅读片段。排障时先用 [`doctor --support-report`](docs/wiki/local-support-report.md) 预览脱敏报告；这些命令不会自动改配置或重启。
+V5 可追加 `--running` 核对进程已加载值，或用 `--minimal-yaml` 生成所选层的精简阅读片段。排障时先用 [`doctor --support-report`](docs/wiki/local-support-report.md) 预览脱敏报告；这些命令不会自动改配置或重启。
 
 | 想调整什么 | 配置 / 文档 |
 | --- | --- |
