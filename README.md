@@ -60,6 +60,24 @@ card:
 
 V5 的桌面验收已核对“已超时”状态、失效选项和“查看续答”实际跳转；此前的桌面交互及手机显示也分别记录。客户端、主题和配置会影响外观，验收范围见[飞书验收清单](docs/wiki/feishu-acceptance.md)。
 
+| V5：审批后续答与本轮统计 | V5：超时状态与失效选项 |
+| --- | --- |
+| [![V5 续答、操作回执与 footer](docs/assets/feishu-v5-continuation-redacted.png)](docs/assets/feishu-v5-continuation-redacted.png) | [![V5 超时与交互失效](docs/assets/feishu-v5-expiry-redacted.png)](docs/assets/feishu-v5-expiry-redacted.png) |
+
+**单选、多选与文本输入回执**
+
+三张卡分别保留单选 `A`、多选 `A, C` 和自由文本 `手机输入验收123`。这里展示的是提交后的“选择已记录”状态；待选择时使用按钮或表单，提交后保留回执，后续结果继续显示在回复卡中。
+
+[![单选、多选、文本输入的已提交回执](docs/assets/feishu-v5-clarify-receipts-redacted.png)](docs/assets/feishu-v5-clarify-receipts-redacted.png)
+
+**命令确认按钮**
+
+`/reload-mcp` 的确认卡提供“允许一次”“始终允许”和“取消”。下图来自早期候选的手机端命令验收，展示操作前的按钮；模型工具审批的选项以实际权限范围为准。
+
+<img src="docs/assets/feishu-command-approval-redacted.png" alt="手机端命令确认：允许一次、始终允许、取消" width="420">
+
+以上界面图均取自真实验收截图，经生成式工具移除头像、姓名及引用身份信息，并整理展示排版；局部字形、间距可能与原图不同。原始截图另行保留作为验收证据。点击图片可查看大图。见[图片来源说明](docs/assets/v5-visuals.md)。
+
 <details>
 <summary>查看 V4.x 真实界面参考（历史版本）</summary>
 

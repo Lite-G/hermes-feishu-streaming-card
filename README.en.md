@@ -66,6 +66,24 @@ The cover is AI-generated V5 artwork, not a screenshot. The actual flow is: stre
 
 V5 desktop acceptance verified the timed-out state, expired choices and an actual continuation-link click. Earlier desktop interactions and phone display were recorded separately. Appearance depends on client, theme and configuration; see the [Feishu acceptance checklist](docs/wiki/feishu-acceptance.md).
 
+| V5: continuation after approval | V5: timeout and expired choices |
+| --- | --- |
+| [![V5 continuation and turn footer](docs/assets/feishu-v5-continuation-redacted.png)](docs/assets/feishu-v5-continuation-redacted.png) | [![V5 timeout and expired interaction](docs/assets/feishu-v5-expiry-redacted.png)](docs/assets/feishu-v5-expiry-redacted.png) |
+
+**Single-choice, multiple-choice and text-input receipts**
+
+The three cards retain the single answer `A`, multiple answers `A, C` and free text `手机输入验收123`. These are submitted receipts, marked “选择已记录” (selection recorded). Pending interactions use buttons or forms; submission leaves a receipt while subsequent output continues in the reply card.
+
+[![Submitted single-choice, multiple-choice and text-input receipts](docs/assets/feishu-v5-clarify-receipts-redacted.png)](docs/assets/feishu-v5-clarify-receipts-redacted.png)
+
+**Command confirmation buttons**
+
+The `/reload-mcp` confirmation offers “允许一次” (allow once), “始终允许” (always allow) and “取消” (cancel). This image comes from mobile command acceptance on an earlier candidate and shows the buttons before a decision. Model-tool approval options depend on the actual permission scope.
+
+<img src="docs/assets/feishu-command-approval-redacted.png" alt="Mobile command confirmation: allow once, always allow and cancel" width="420">
+
+These interface images derive from real acceptance screenshots, with generative privacy redaction and presentation layout adjustments. Local glyphs and spacing may differ from the originals. Original screenshots remain the acceptance evidence. Click to enlarge. See [image provenance](docs/assets/v5-visuals.md).
+
 <details>
 <summary>View real V4.x interface references (historical versions)</summary>
 
