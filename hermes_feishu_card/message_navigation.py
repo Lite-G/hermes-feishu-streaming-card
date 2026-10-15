@@ -1,11 +1,11 @@
-"""Optional navigation from the same confirmed IM response, never guessed IDs."""
+"""Optional navigation from verified IM link/position metadata, never guessed IDs."""
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
 import re
 from typing import Any, Mapping
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from .card_limits import inspect_card_limits
 
@@ -25,24 +25,60 @@ def _matches(query: dict[str, list[str]], names: tuple[str, ...], expected: str)
     return bool(expected and present) and all(value == [expected] for value in present)
 
 
+def _link_from_position(
+    data: Mapping[str, Any], host: str | None, *,
+    thread_id: str | None, reply_in_thread: bool,
+) -> str | None:
+    """Use same-receipt position metadata; never derive positions from IDs."""
+    if host is None:
+        return None
+    response_thread = data.get("thread_id")
+    if type(response_thread) not in (str, type(None)):
+        return None
+    if thread_id or reply_in_thread or response_thread:
+        if (not response_thread or (thread_id and thread_id != response_thread)):
+            return None
+        position = data.get("thread_message_position")
+        path = "/client/thread/open"
+        query = {
+            "openthreadid": response_thread, "openchatid": data["chat_id"],
+            "open_thread_id": response_thread, "open_chat_id": data["chat_id"],
+        }
+        position_key = "thread_position"
+    else:
+        position = data.get("message_position")
+        path = "/client/chat/open"
+        query = {"openChatId": data["chat_id"]}
+        position_key = "position"
+    if type(position) not in (str, int) or _POSITION.fullmatch(str(position)) is None:
+        return None
+    query[position_key] = str(position)
+    return "https://" + host + path + "?" + urlencode(query)
+
+
 def navigation_from_response(
     data: Mapping[str, Any], *, api_base_url: str, chat_id: str,
     thread_id: str | None = None, reply_in_thread: bool = False,
 ) -> MessageNavigation | None:
-    """Accept only a platform-provided exact chat/thread link for this receipt.
+    """Accept an exact link or verified position metadata from this receipt.
 
     Missing metadata or unfamiliar links omit the optional control. No history
-    lookup, position synthesis or navigation to a card-container ID is allowed.
+    lookup, guessed positions or navigation to a card-container ID is allowed.
     """
     message_id = data.get("message_id")
     url = data.get("message_app_link")
     if (not isinstance(message_id, str) or not message_id.startswith("om_")
-            or not chat_id or data.get("chat_id") != chat_id
-            or not isinstance(url, str) or not url or len(url) > 2048
-            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in url)):
+            or not chat_id or data.get("chat_id") != chat_id):
         return None
     try:
         expected_host = _BRANDS.get(urlsplit(api_base_url).hostname or "")
+        if url is None or url == "":
+            url = _link_from_position(
+                data, expected_host, thread_id=thread_id, reply_in_thread=reply_in_thread,
+            )
+        if (not isinstance(url, str) or not url or len(url) > 2048
+                or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in url)):
+            return None
         link = urlsplit(url)
         if (not expected_host or link.scheme != "https" or link.hostname != expected_host
                 or link.username or link.password or link.port not in {None, 443} or link.fragment):

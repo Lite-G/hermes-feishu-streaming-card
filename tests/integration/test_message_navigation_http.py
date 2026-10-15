@@ -147,3 +147,47 @@ async def test_server_discards_mismatched_optional_result_identity(damage):
     result = await _send_card_for_app(app, CHAT, legacy_card(), None)
     assert result.delivered and result.message_id == MESSAGE
     assert result.navigation is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cardkit", [False, True])
+@pytest.mark.parametrize("reply", [False, True])
+async def test_http_position_only_receipt_generates_navigation_without_extra_requests(navigation_http, cardkit, reply):
+    client, receipt, requests = navigation_http
+    receipt.update(message_position="12")
+    if reply:
+        receipt.update(thread_id=THREAD, thread_message_position="23")
+    card = {"schema": "2.0", "config": {"streaming_mode": True}, "body": {"elements": [{"tag": "markdown", "content": "KEEP_BODY"}]}} if cardkit else legacy_card()
+    kwargs = {"reply_to_message_id": "om_anchor_fixture", "thread_id": THREAD,
+              "reply_in_thread": True} if reply else {}
+    app = create_app(client)
+    result = await _send_card_for_app(app, CHAT, card, None, **kwargs)
+    assert result.delivered and result.message_id == MESSAGE
+    assert result.navigation.message_id == MESSAGE and result.navigation.chat_id == CHAT
+    from urllib.parse import parse_qs, urlsplit
+    link = urlsplit(result.navigation.url)
+    query = parse_qs(link.query)
+    assert link.hostname == "applink.feishu.cn"
+    if reply:
+        assert link.path == "/client/thread/open" and query["thread_position"] == ["23"]
+        assert query["openthreadid"] == [THREAD] and query["openchatid"] == [CHAT]
+    else:
+        assert result.navigation.url == LINK
+    paths = [path for _, path, _, _ in requests]
+    assert paths == ["/auth/v3/tenant_access_token/internal"] + (["/cardkit/v1/cards"] if cardkit else []) + [
+        "/im/v1/messages/om_anchor_fixture/reply" if reply else "/im/v1/messages"]
+    assert all(method == "POST" for method, _, _, _ in requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("patch", [
+    {"message_app_link": {}}, {"message_app_link": "https://[bad"},
+    {"message_position": True}, {"chat_id": "oc_wrong"},
+    {"thread_id": THREAD}, {"thread_id": THREAD, "thread_message_position": "bad"}])
+async def test_position_fallback_cannot_turn_bad_optional_metadata_into_send_failure(navigation_http, patch):
+    client, receipt, requests = navigation_http
+    receipt.update(message_position="12")
+    receipt.update(patch)
+    result = await client.send_card_delivery(CHAT, legacy_card())
+    assert result.message_id == MESSAGE and result.navigation is None
+    assert len(requests) == 2

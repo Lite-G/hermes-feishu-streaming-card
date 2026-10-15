@@ -27,7 +27,7 @@
 | portable 安装文件事务与 evidence | `install/file_transaction` | CLI 与 decomposed installer 共用；自动恢复仍要求原有更强目录绑定 |
 | POSIX 目录句柄、文件/stage 身份、bound replace/unlink、回滚内容验证及 cleanup | `install/posix_transaction` | CLI、Recovery、Integrity 共用物理 I/O；各入口保留原计划、锁、fingerprint/Git、ancestry 策略和事务顺序；底层不导入 planner/CLI |
 | 会话、锁及 controller 清理 | `lifecycle.CleanupState` | server 注入清理所需实时 registry 引用；lifecycle 不导入 server、不持有 Application，原身份复核、顺序与上限保持 |
-| 续答消息链接验证与可选按钮预算 | `message_navigation` | 只消费本次确认的 IM 回执；不查历史、不拼猜测链接、不执行任务；server 在送达与 owner 转移后使用 |
+| 续答消息链接验证与可选按钮预算 | `message_navigation` | 只消费本次确认的 IM 回执链接或精确位置；不查历史、不猜位置、不执行任务；server 在送达与 owner 转移后使用 |
 | 当前卡片替换资格、输入冻结与回执方言选择 | `owner_display_policy` | 原 owner/generation 先核验；failed 回执先渲染再选来源；模式按原分支惰性查询；实际 PATCH 和提交留 server |
 | 维护排空证据与连续空闲心跳 | `maintenance_evidence` | 原维护编排保留轮询、时间、锁、lease 与停服；每 sender 数据仍由 runtime_ownership 管理 |
 | 受理事件观测耗时 | `observations` | session 只记录已接受事件；checkpoint 不恢复计时；不推导模型速率 |

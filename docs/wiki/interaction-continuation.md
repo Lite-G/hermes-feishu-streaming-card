@@ -52,11 +52,11 @@ V4.6.4 已发布，使 clarify 和 approval 之后的结果按聊天创建时间
 
 ## 开发候选：查看续答
 
-新续答明确送达后，旧 schema-2 卡可以提供“查看续答”按钮。链接只来自该次 IM create/reply 返回的 `message_app_link`，并核对消息、聊天、官方品牌域名与定位参数；CardKit 使用最终 IM 消息回执，不能使用卡片容器 ID。没有有效链接、话题定位不完整或链接格式未知时，保留原文字提示，不新增历史查询或权限。
+新续答明确送达后，旧 schema-2 卡可以提供“查看续答”按钮。优先验证该次 IM create/reply 返回的 `message_app_link`；该字段缺失或为空时，只用同一回执的消息、聊天与精确位置字段生成官方品牌 AppLink。位置必须是非负整数或最多 20 位的十进制数字字符串，不能从消息 ID 推算。话题必须同时具备匹配的 `thread_id` 与 `thread_message_position`，缺失时不退回父聊天定位。非空但非法的原链接不会被忽略后另造链接。CardKit 使用最终 IM 消息回执，不能使用卡片容器 ID。没有可验证的定位信息、话题定位不完整或品牌未知时，保留原文字提示，不新增历史查询或权限。
 
 按钮只打开已确认的消息，不重新执行任务或批准操作。仅按钮使整卡超限时省略按钮，原文与审批范围不裁剪；旧卡更新失败不回滚新 owner。后续审批重复精简保留导航，不为导航增加检查点字段或恢复旧授权。
 
-来源：[官方发送回执模型](https://github.com/larksuite/oapi-sdk-python/blob/e321c555061b60cfbb3a3166b22c8ebc8a45fa82/lark_oapi/api/im/v1/model/create_message_response_body.py)、[官方消息 AppLink 实现](https://github.com/larksuite/cli/blob/1d26c2283915a4f8e7d03a880ed0e4fae91309a8/shortcuts/im/convert_lib/content_convert.go#L267)、[JSON 2.0 按钮](https://open.larkenterprise.com/document/feishu-cards/card-json-v2-components/interactive-components/button)。本候选不照搬位置拼接 fallback，只接受平台返回的有效链接。自动化与桌面/移动端真实点击仍分别验收，尚未发布。
+来源：[官方发送回执模型](https://github.com/larksuite/oapi-sdk-python/blob/e321c555061b60cfbb3a3166b22c8ebc8a45fa82/lark_oapi/api/im/v1/model/create_message_response_body.py)、[官方消息 AppLink 实现](https://github.com/larksuite/cli/blob/1d26c2283915a4f8e7d03a880ed0e4fae91309a8/shortcuts/im/convert_lib/content_convert.go#L288)、[JSON 2.0 按钮](https://open.larkenterprise.com/document/feishu-cards/card-json-v2-components/interactive-components/button)。本候选采用同一回执位置构造链接的方式，但拒绝浮点、布尔或猜测位置，并在话题信息缺失时保留不导航的边界。自动化与桌面/移动端真实点击仍分别验收，尚未发布。
 
 ## 开发候选：旧段内容与拒绝语义
 
