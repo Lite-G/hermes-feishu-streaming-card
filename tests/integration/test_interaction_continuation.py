@@ -755,3 +755,60 @@ async def test_receipt_pruning_preserves_navigation_without_restoring_controls(m
     assert 'interaction_review_scope' not in str(cleaned)
     assert 'interaction_result' not in str(cleaned)
     assert not owner.approval_retirements[0]['interaction'].callback_token
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [False, True])
+async def test_continuation_queries_only_confirmed_new_owner(failure):
+    from hermes_feishu_card.message_navigation import MessageNavigation
+
+    class LookupClient(NavigationClient):
+        def __init__(self):
+            super().__init__(include_link=False)
+            self.lookups = []
+
+        async def lookup_message_navigation(self, mid, chat, **route):
+            self.lookups.append((mid, chat, route))
+            assert len(self.sent) == 3
+            if failure:
+                raise RuntimeError('synthetic lookup failure')
+            return MessageNavigation(mid, chat,
+                'https://applink.feishu.cn/client/thread/open?openchatid=chat_fixture&openthreadid=omt_fixture&thread_position=12')
+
+    client = LookupClient()
+    app = create_app(client, card_config={'flush_interval_ms': 0})
+    async with TestClient(TestServer(app)) as http:
+        await post(http, 'message.started', 0)
+        await post(http, 'answer.delta', 1, {'text': 'KEEP_PREVIOUS'})
+        await interact(http, 2, 'lookup_question')
+        assert not client.lookups
+        await post(http, 'answer.delta', 4, {'text': 'KEEP_NEW'})
+        await asyncio.sleep(.02)
+        assert len(client.lookups) == 1
+        mid, chat, route = client.lookups[0]
+        assert mid == app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture'] == 'om_segment_3'
+        assert chat == 'chat_fixture' and route['reply_in_thread'] is True
+        retired = next(c for m, c in reversed(client.updated) if m == 'om_segment_1')
+        assert len(continuation_buttons(retired)) == int(not failure)
+        assert 'KEEP_PREVIOUS' in str(retired)
+        assert len(client.sent) == 3
+
+
+@pytest.mark.asyncio
+async def test_navigation_lookup_owner_change_does_not_patch_predecessor(monkeypatch):
+    from hermes_feishu_card import server
+    from hermes_feishu_card.session import CardSession
+    client = Client()
+    app = create_app(client)
+    owner = CardSession('fixture', 'turn_fixture', 'chat_fixture')
+    app[SESSIONS_KEY]['turn_fixture'] = owner
+    app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture'] = 'om_new_fixture'
+    async def lookup(*args, **kwargs):
+        app[FEISHU_MESSAGE_IDS_KEY]['turn_fixture'] = 'om_replaced_fixture'
+        return None
+    monkeypatch.setattr(client, 'lookup_message_navigation', lookup, raising=False)
+    monkeypatch.setattr(server, '_render_static_display_card', lambda *args, **kwargs:
+        {'schema': '2.0', 'body': {'elements': [{'tag': 'markdown', 'content': 'KEEP'}]}})
+    assert not await server._retire_continuation_predecessor(
+        app, 'turn_fixture', 'om_old_fixture', copy.deepcopy(owner), bot_id=None)
+    assert not client.updated

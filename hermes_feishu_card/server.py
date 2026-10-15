@@ -5725,9 +5725,27 @@ async def _retire_continuation_predecessor(app, session_key, message_id, snapsho
         )
         if card is None:
             return False
+        target_id = app[FEISHU_MESSAGE_IDS_KEY].get(session_key) or ""
+        target_owner = app[SESSIONS_KEY].get(session_key)
+        lookup = getattr(_client_for_bot(app, bot_id), "lookup_message_navigation", None)
+        if navigation is None and target_id and target_owner is not None and callable(lookup):
+            route = target_owner.display_segment
+            try:
+                navigation = await asyncio.wait_for(lookup(
+                    target_id, snapshot.chat_id,
+                    thread_id=route.get("thread_id") or None,
+                    reply_in_thread=bool(route.get("reply_in_thread") or target_owner.reply_in_thread),
+                ), timeout=1.5)
+            except Exception:
+                navigation = None
+            if not isinstance(navigation, MessageNavigation):
+                navigation = None
+            if (app[SESSIONS_KEY].get(session_key) is not target_owner
+                    or app[FEISHU_MESSAGE_IDS_KEY].get(session_key) != target_id):
+                return False
         card = with_continuation_navigation(
             card, navigation,
-            message_id=app[FEISHU_MESSAGE_IDS_KEY].get(session_key) or "",
+            message_id=target_id,
             chat_id=snapshot.chat_id,
         )
         interaction = snapshot.active_interaction

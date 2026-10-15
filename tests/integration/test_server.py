@@ -3316,7 +3316,13 @@ async def test_hfc_monitor_command_reports_safe_metrics(client):
     assert "om_monitor_secret" not in content
 
 
-async def test_hfc_operational_commands_surface_native_handoff_manual_review_safely():
+async def test_hfc_operational_commands_surface_native_handoff_manual_review_safely(monkeypatch):
+    # This verifies safe command delivery, not the developer's installed Hermes.
+    # Keep doctor deterministic and away from the real runtime/configuration.
+    monkeypatch.setattr(
+        sidecar_server, "_build_operations_report_sync",
+        lambda *args, **kwargs: (operations_report(), SimpleNamespace(root=Path("/fixture/hermes"))),
+    )
     feishu_client = FakeFeishuClient()
     native_handoff_store = SimpleNamespace(
         safe_status=lambda: {

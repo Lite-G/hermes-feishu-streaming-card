@@ -423,6 +423,39 @@ class FeishuClient:
             )
         return data["message_id"]
 
+    async def lookup_message_navigation(
+        self, message_id: str, chat_id: str, *,
+        thread_id: str | None = None, reply_in_thread: bool = False,
+    ) -> MessageNavigation | None:
+        """Read only the confirmed continuation message; failure is optional."""
+        if not isinstance(message_id, str) or not message_id.startswith("om_") or not chat_id:
+            return None
+
+        async def lookup():
+            token = await self._tenant_token()
+            body = await self._request_json(
+                "GET", f"/im/v1/messages/{quote(message_id, safe='')}",
+                token=token, max_response_bytes=65536,
+            )
+            data = body.get("data")
+            items = data.get("items") if isinstance(data, dict) else None
+            if not isinstance(items, list) or len(items) != 1:
+                return None
+            item = items[0]
+            if (not isinstance(item, dict) or item.get("message_id") != message_id
+                    or item.get("chat_id") != chat_id or item.get("deleted") is not False):
+                return None
+            return navigation_from_response(
+                item, api_base_url=self.config.base_url, chat_id=chat_id,
+                thread_id=thread_id, reply_in_thread=reply_in_thread,
+            )
+
+        try:
+            return await asyncio.wait_for(lookup(), timeout=1.5)
+        except Exception:
+            # A metadata read must never turn a confirmed send into a retry.
+            return None
+
     async def _tenant_token(self) -> str:
         now = time.time()
         if self._tenant_access_token and now < self._tenant_access_token_expires_at:
@@ -454,6 +487,7 @@ class FeishuClient:
         token: str | None = None,
         params: dict[str, str] | None = None,
         json_body: dict[str, Any] | None = None,
+        max_response_bytes: int | None = None,
     ) -> dict[str, Any]:
         url = f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
         headers = {"Content-Type": "application/json; charset=utf-8", "Accept-Encoding": "gzip, deflate"}
@@ -471,9 +505,20 @@ class FeishuClient:
                     params=params,
                     json=json_body,
                     headers=headers,
+                    **({"allow_redirects": False} if max_response_bytes is not None else {}),
                 ) as response:
+                    if max_response_bytes is not None and response.status != 200:
+                        raise FeishuAPIError("Feishu metadata HTTP failure", status_code=response.status)
                     try:
-                        payload = await response.json(content_type=None)
+                        if max_response_bytes is None:
+                            payload = await response.json(content_type=None)
+                        else:
+                            chunks = bytearray()
+                            async for chunk in response.content.iter_chunked(8192):
+                                chunks.extend(chunk)
+                                if len(chunks) > max_response_bytes:
+                                    raise FeishuAPIError("Feishu metadata response too large", retryable=False)
+                            payload = json.loads(chunks)
                     except (aiohttp.ContentTypeError, json.JSONDecodeError) as exc:
                         retryable = response.status in _RETRYABLE_HTTP_STATUSES
                         raise FeishuAPIError(
