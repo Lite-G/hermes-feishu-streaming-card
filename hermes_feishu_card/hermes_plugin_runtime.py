@@ -366,7 +366,7 @@ class TurnBinding:
     ingress: IngressBinding
     turn_id: str
     _state: TurnState = field(default=TurnState.PENDING_START, init=False, repr=False, compare=False)
-    # Display-only outcomes from matched original approval callbacks, never authority.
+    # Display-only outcomes from matched original interaction callbacks, never authority.
     _approval_tool_outcomes: dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
     _approval_outcome_overflow: bool = field(default=False, init=False, repr=False, compare=False)
     metrics: TurnMetrics | None = field(default=None, init=False, repr=False, compare=False)
@@ -1103,6 +1103,55 @@ class PluginRuntime:
                 }
         except Exception:
             return None
+
+    def clarify_timeout_observer(
+        self, session_identity, turn_id, interaction_id, fingerprint,
+        pending_handle, tool_call_id, timeout,
+    ):
+        """Borrow the admitted handle for one wait; never resolve or extend it."""
+        if (not self._exact_nonblank(tool_call_id)
+                or type(timeout) not in (int, float)
+                or not isfinite(timeout) or timeout <= 0):
+            return None
+        with self._lock:
+            key = self._patch_interaction_key_locked(
+                "clarify", session_identity, turn_id, interaction_id, fingerprint,
+            )
+            state = self._patch_interactions.get(key)
+            turn = self._turns.get(turn_id)
+            if (self._closed or type(state) is not _PatchInteraction
+                    or state.pending_handle is not pending_handle or not state.hfc_owned
+                    or turn is None or not turn.accepts_observer_events
+                    or turn.ingress.gateway_session_key != session_identity
+                    or state.turn_digest in self._interaction_cleanup_turns
+                    or self._card_active_coordinator_locked(turn_id) is None
+                    or pending_handle.response is not None
+                    or pending_handle.event.is_set()):
+                return None
+        deadline = monotonic() + timeout
+
+        def observe(response):
+            # The original wait removed its registry entry on completion. Retain
+            # only this local borrowed reference, not a second pending registry.
+            if (response is not None or monotonic() < deadline
+                    or pending_handle.response is not None
+                    or pending_handle.event.is_set()):
+                return
+            with self._lock:
+                if (self._closed or self._turns.get(turn_id) is not turn
+                        or not turn.accepts_observer_events
+                        or self._card_active_coordinator_locked(turn_id) is None
+                        or state.turn_digest in self._interaction_cleanup_turns
+                        or state.selected_value is not None
+                        or state.resolving_value is not None):
+                    return
+                outcomes = turn._approval_tool_outcomes
+                if len(outcomes) < 128 or tool_call_id in outcomes:
+                    outcomes[tool_call_id] = "timeout"
+                else:
+                    turn._approval_outcome_overflow = True
+
+        return observe
 
     def admit_patch_interaction(
         self,
@@ -2059,7 +2108,7 @@ class PluginRuntime:
                         or turn._approval_outcome_overflow)
                         and kwargs.get("session_id") != turn.ingress.session_id):
                     # Do not let an unrelated result occupy this call's terminal
-                    # event identity before the matched approval result arrives.
+                    # event identity before the matched interaction result arrives.
                     return
                 if (turn is not None and turn.accepts_observer_events
                         and kwargs.get("session_id") == turn.ingress.session_id):

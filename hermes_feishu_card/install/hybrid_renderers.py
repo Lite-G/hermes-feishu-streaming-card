@@ -676,7 +676,7 @@ def _render_exact_base_final_delivery(content: bytes, descriptor: PatchGroupDesc
     return _insert_at_line(content, anchor=anchor, block=block, before=True)
 
 
-def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor, *, preserve_owned: bool = True) -> bytes:
+def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor, *, preserve_owned: bool = True, observe_timeout: bool = True) -> bytes:
     _text, newline = _decode(content)
     indent = " " * 12
     register_fragment, resolve_fragment = descriptor.fragments
@@ -717,7 +717,16 @@ def _render_clarify_round_trip(content: bytes, descriptor: PatchGroupDescriptor,
             "            ctx._status_adapter.pause_typing_for_chat(ctx._status_chat_id)",
             "        except Exception:",
             "            pass",
-            "        _hfc_clarify_response = _clarify_mod.wait_for_response(clarify_id, timeout=float(_hfc_clarify_timeout))",
+            *((
+                "        from hermes_feishu_card.hook_runtime import wait_for_owned_clarify as _hfc_wait_clarify",
+                "        _hfc_clarify_response = _hfc_wait_clarify(",
+                "            {\"_hfc_authorized\": True, \"platform\": \"feishu\", \"turn_id\": str(getattr(agent, \"_current_turn_id\", \"\") or \"\")},",
+                "            {\"session_identity\": ctx.session_key or ctx._status_chat_id, \"interaction_id\": clarify_id, \"fingerprint\": _hfc_clarify_fingerprint},",
+                "            _hfc_clarify_entry, _clarify_mod.wait_for_response, _hfc_clarify_timeout,",
+                "        )",
+            ) if observe_timeout else (
+                "        _hfc_clarify_response = _clarify_mod.wait_for_response(clarify_id, timeout=float(_hfc_clarify_timeout))",
+            )),
             "        if _hfc_clarify_response is None or _hfc_clarify_response == \"\":",
             "            return f\"[user did not respond within {int(_hfc_clarify_timeout / 60)}m]\"",
             "        return _hfc_clarify_response",
@@ -1060,9 +1069,18 @@ def historical_publish_registry(registry: PatchDescriptorRegistry) -> PatchDescr
 def historical_clarify_registry(registry: PatchDescriptorRegistry) -> PatchDescriptorRegistry:
     """Exact pre-owned-wait guard, for verified official restore only."""
     descriptors = tuple(
-        replace(d, renderer=lambda content, d=d: _render_clarify_round_trip(content, d, preserve_owned=False),
+        replace(d, renderer=lambda content, d=d: _render_clarify_round_trip(content, d, preserve_owned=False, observe_timeout=False),
                 renderer_revision=_REVISION)
         if d.group == "clarify_round_trip" else d
         for d in registry.descriptors
     )
     return replace(registry, descriptors=descriptors)
+
+
+def historical_clarify_wait_registry(registry: PatchDescriptorRegistry) -> PatchDescriptorRegistry:
+    """Exact 9e/738 owned wait before timeout observation, for restore only."""
+    return replace(registry, descriptors=tuple(
+        replace(d, renderer=lambda content, d=d: _render_clarify_round_trip(content, d, observe_timeout=False))
+        if d.group == "clarify_round_trip" else d
+        for d in registry.descriptors
+    ))

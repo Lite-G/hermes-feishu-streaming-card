@@ -496,6 +496,7 @@ def _installed_patch_registry(installed, backups, patch_groups):
     """Select only an exact known rendering after callers verify manifest hashes."""
     from .hybrid_renderers import (
         historical_clarify_registry, historical_publish_registry, historical_terminal_registry,
+        historical_clarify_wait_registry,
     )
 
     provenance = load_fixed_tag_native_hook_provenance(FIXED_TAG_PROVENANCE_PATH)
@@ -511,6 +512,7 @@ def _installed_patch_registry(installed, backups, patch_groups):
     )
     for registry in (
         HYBRID_PATCH_REGISTRY,
+        historical_clarify_wait_registry(HYBRID_PATCH_REGISTRY),
         pre_metrics,
         historical_terminal_registry(pre_metrics),
     ):

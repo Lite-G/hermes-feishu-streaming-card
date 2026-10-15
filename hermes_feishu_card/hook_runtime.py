@@ -937,6 +937,49 @@ def resolve_pending_interaction_from_hermes_locals(
     )
 
 
+def wait_for_owned_clarify(
+    local_vars, interaction_data, pending_handle, waiter, timeout,
+):
+    """Observe original wait facts without changing its return or exceptions."""
+    observer = None
+    runtime = None
+    values = None
+    correlation = None
+    try:
+        values = _thin_interaction_values(
+            local_vars, "clarify", interaction_data, pending_handle,
+        )
+        from tools import approval
+        if (values is not None
+                and approval._approval_session_key.get() == values[1]
+                and approval._approval_turn_id.get() == values[2]):
+            runtime = _plugin_runtime()
+            correlation = (
+                approval._approval_session_key.get(), approval._approval_turn_id.get(),
+                approval._approval_tool_call_id.get(),
+            )
+            observer = runtime.clarify_timeout_observer(
+                *values[1:], correlation[2], timeout,
+            )
+    except Exception:
+        observer = None
+    # Deliberately outside the observer guard: owned wait failures propagate.
+    response = waiter(interaction_data["interaction_id"], timeout=float(timeout))
+    try:
+        if (observer is not None and _plugin_runtime() is runtime
+                and correlation == (
+                    approval._approval_session_key.get(), approval._approval_turn_id.get(),
+                    approval._approval_tool_call_id.get(),
+                )
+                and _thin_interaction_values(
+                    local_vars, "clarify", interaction_data, pending_handle,
+                ) == values):
+            observer(response)
+    except Exception:
+        pass
+    return response
+
+
 def admit_pending_interaction_from_hermes_locals(
     local_vars: object,
     kind: object,

@@ -152,7 +152,8 @@
       "tests/unit/test_native_hook_capabilities.py",
       "tests/unit/test_native_probe_diagnostics.py",
       "tests/unit/test_clarify_delivery_admission.py",
-      "tests/unit/test_plugin_turn_metrics.py"
+      "tests/unit/test_plugin_turn_metrics.py",
+      "tests/unit/test_clarify_timeout_status.py"
     ],
     "storage": [
       "tests/unit/test_session_store.py",
