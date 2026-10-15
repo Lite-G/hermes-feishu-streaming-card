@@ -1794,7 +1794,7 @@ class PluginRuntime:
         created_at = self._now()
         if turn.metrics is not None:
             try:
-                from .hook_runtime import canonical_turn_context_limit
+                from .canonical_turn import canonical_turn_context_limit
                 turn.metrics.context_limit = canonical_turn_context_limit(turn_id)
             except Exception:
                 turn.metrics.context_limit = None

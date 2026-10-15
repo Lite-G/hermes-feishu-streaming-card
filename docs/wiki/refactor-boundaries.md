@@ -109,3 +109,7 @@ Recovery 的 fingerprint 复算、写入优先于删除、final sweep 与逆序�
 `existing_owner_projection.project_existing_owner` 持有完整方言与容量选择：普通卡原样返回、优先保留安全的实时输入卡、使用原正文投影拼接 legacy 回执、超限时保留完整原回执并返回 native/deferred-native 结果。原始超限 inspection 与原因继续随结果返回，不把安全占位卡冒称完整答案已送达。
 
 server 只适配本轮真实 owner message、session 与配置。实时卡和标题按原分支惰性获取；无 legacy/schema2 组合时不读取两者，安全实时卡不查询 fallback 标题。projection 不持有 app/session/注册表，不执行 I/O、确认授权或提交 owner 变更；原锁、投递与检查点顺序保留。未知或旧交互不能由静态回执恢复执行。
+
+## Canonical turn carrier
+
+`canonical_turn.py` owns the existing thread/task ContextVar, bounded registry, opaque tokens and weak Agent metrics reference. `hook_runtime` keeps direct compatibility exports for installed hook call sites; the plugin reads the same carrier directly, without importing the hook adapter. Publication, copied-context restrictions, reset revocation and clear order are unchanged. There is no second registry or authorization path. The private registry-limit fault injection belongs to this implementation module.

@@ -601,6 +601,10 @@
       "delivery",
       "storage",
       "interaction"
+    ],
+    "hermes_feishu_card/canonical_turn.py": [
+      "runtime",
+      "plugin"
     ]
   }
 }

@@ -646,6 +646,63 @@ def test_context_agent_reference_is_weak_and_clear_does_not_retain_it():
         assert hook_runtime.clear_canonical_turn_id(token)
 
 
+def test_terminal_context_metrics_do_not_import_hook_runtime(monkeypatch):
+    """The plugin reads the shared carrier without re-entering its adapter."""
+    import builtins
+    from hermes_feishu_card import hook_runtime
+
+    runtime, posted = active_runtime()
+    agent = weak_agent()
+    token = rendered_publish(agent)
+    original_import = builtins.__import__
+    adapter_imports = []
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "hook_runtime" or name.endswith(".hook_runtime"):
+            adapter_imports.append(name)
+            raise ImportError("adapter must not be a metrics dependency")
+        return original_import(name, *args, **kwargs)
+
+    try:
+        invoke_original(runtime, "pre_llm_call", agent)
+        with monkeypatch.context() as patch:
+            patch.setattr(builtins, "__import__", guarded_import)
+            finish(runtime, agent)
+        payload, _session = terminal_session(posted)
+        assert not adapter_imports
+        assert payload["data"]["context"]["max_tokens"] == 200000
+    finally:
+        runtime.close()
+        assert hook_runtime.clear_canonical_turn_id(token)
+
+
+def test_canonical_carrier_is_standalone_and_hook_exports_share_one_registry():
+    import sys
+    from hermes_feishu_card import canonical_turn, hook_runtime
+
+    for name in (
+        "publish_canonical_turn_id", "clear_canonical_turn_id",
+        "consume_canonical_turn_id", "canonical_turn_context_limit",
+        "_canonical_turn_registry_size",
+    ):
+        assert getattr(hook_runtime, name) is getattr(canonical_turn, name)
+    child = subprocess.run(
+        [sys.executable, "-I", "-c", """
+import sys
+sys.path.insert(0, sys.argv[1])
+from hermes_feishu_card import canonical_turn as carrier
+token = carrier.publish_canonical_turn_id('standalone-synthetic-turn')
+assert carrier.consume_canonical_turn_id() == 'standalone-synthetic-turn'
+assert carrier.clear_canonical_turn_id(token)
+assert carrier._canonical_turn_registry_size() == 0
+assert 'hermes_feishu_card.hook_runtime' not in sys.modules
+assert 'hermes_feishu_card.hermes_plugin_runtime' not in sys.modules
+""", str(Path(canonical_turn.__file__).resolve().parent.parent)],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert child.returncode == 0, child.stderr
+
+
 @pytest.mark.parametrize(
     "case",
     [

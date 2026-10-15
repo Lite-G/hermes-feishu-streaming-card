@@ -37,6 +37,7 @@
 - Hybrid 原生工具提示在 callback 入队前和 sender 每次出队后检查当前卡片所有权，保留独立日志。只有同一 canonical turn、profile、chat/thread、Gateway session 与 generation 的 `CARD_ACTIVE` 才抑制；未知、未接管、其他平台及异常继续原生路径。后台 sender 启动早于接管，不能仅在方法入口检查一次。接受证明仅存于同一个 `TurnContext`，绑定同一 runtime 和完整路由，终结后用于丢弃该上下文的进度尾队列；换轮次、换 runtime 或 runtime 关闭不得复用。取消任务时也检查该证明，避免最后一次队列清空或编辑重新产生原生提示。
 - stable tool lifecycle 与 legacy progress callback 不能同时投递同一调用；wrapper 检测必须读取 agent 当前实际 callback，显式 fallback 标记仅用于卡片路径未接受时恢复原生进度。
 - 已识别 `system.notice` 必须按 sidecar 结果分流：已有卡片异步更新的 `accepted` 与独立卡首次投递的 `delivered` 抑制原生文本，`not_sent` 回退原始通知文本，`unknown` 只尝试固定通用提示且不重复原始通知文本；`accepted` 必须同时带有 `applied=true`，不可解析响应一律视为 `unknown`。
+- canonical turn 的 thread/task carrier、有限 registry 与弱 Agent 引用由 `canonical_turn.py` 单独持有；hook 入口为直接兼容导出，PluginRuntime 直接读取同一模块，不反向导入 hook adapter。不可为了 footer 新建第二份身份或授权状态。
 - 上下文压缩只从 `_status_callback_sync` 的固定 `Compacting context` 标记产生 `context-compaction`；不得用静默 watchdog、普通 compression 文本或虚构百分比推断。
 - cron completion hook 必须位于 `extract_media` / `media_files` 过滤之后：`native_delivery=required` 时清空原生正文但继续文件上传，不能在媒体提取前提前返回。
 - 不得恢复固定 command allowlist；built-in、alias、plugin/quick、unknown feedback 都必须经过统一 command context。V4.2.0 的飞书私聊裸 `/update` 必须优先进入专用维护流；群聊、非飞书、别名和带参数更新仍使用 Hermes 原 handler。
