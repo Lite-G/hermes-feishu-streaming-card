@@ -236,7 +236,7 @@ def test_second_publication_rename_failure_restores_previous_source(pm_env, monk
     receipt.finish()
     member = receipt.member
     before = {p.name: p.read_bytes() for p in member.iterdir()}
-    rename = pm.os.rename
+    rename = pm.os.rename if dirfd else Path.rename
     failed = []
     def fail_staging(source, target, **kwargs):
         if (not failed and Path(source).name.startswith('.hfc-runtime-')
@@ -244,10 +244,13 @@ def test_second_publication_rename_failure_restores_previous_source(pm_env, monk
             failed.append(True)
             raise OSError('injected second rename failure')
         return rename(source, target, **kwargs)
-    monkeypatch.setattr(pm.os, 'rename', fail_staging)
+    # Older pathlib caches os.rename in its accessor, so patch the actual
+    # portable call site instead of relying on a dynamic os.rename lookup.
+    monkeypatch.setattr(pm.os if dirfd else Path, 'rename', fail_staging)
     with pytest.raises(OSError, match='second rename failure'):
         pm.ensure(pm_env.root, Path('/fixture/python'), home=pm_env.home,
                   spec='/fixture/new-source.whl', version=VERSION)
+    assert failed == [True]
     assert {p.name: p.read_bytes() for p in member.iterdir()} == before
     assert not list(member.parent.glob('.hfc-runtime-*'))
     assert pm_env.state['enabled'] == ['other', pm.NAME]
