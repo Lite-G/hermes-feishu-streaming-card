@@ -182,4 +182,3 @@ async def test_actual_adapter_egress_preserves_plain_text_and_result(monkeypatch
     assert len(calls) == (1 if context_kind == "valid" else 0)
     if calls:
         assert calls[0][1]["route"] == {"profile_id": "secondary", "chat_id": "chat_fixture", "conversation_id": "topic_fixture"}
-
