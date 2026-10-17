@@ -12,7 +12,7 @@ V4.6.6 继续适配 [PR #338](https://github.com/baileyh8/hermes-feishu-streamin
 - classic、未建卡、身份不完整、旧 sidecar 或查询失败时，Working 保留 Hermes 原地编辑及终轮清理。HFC 不安排周期撤回，避免删除更新目标后每轮重新发送；接管前已有的原生心跳仍由 Hermes 收尾。一次性的压缩、等待审批、重试提示仍使用原有 15 秒策略。
 - Redirect、Interrupt、Steer 使用原有策略。未知模板、未知签名、无法验证的 adapter 或 profile 保留原始行为。
 
-## 中文瞬态提示（#434，待发布）
+## 中文瞬态提示（#434，V5.0.2）
 
 Hermes 开启 `display.language: zh` 后，原有英文判定无法识别中文 busy 回执。现在 redirect、interrupt、steer（含活跃子代理变体）的简体中文和英文完整模板共用同一识别边界，确认发送成功后沿原 profile/chat/thread 调度 15 秒撤回；允许原生单行活动详情。裸 `⏳ 正在压缩上下文` 与其 `...` 形式沿用英文裸压缩提示的撤回策略。没有新增配置，也不读取或改变 Hermes 的当前 locale。
 
