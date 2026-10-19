@@ -89,7 +89,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NousResearch/hermes-agent
-          ref: e06df9c2eae6901f4c88f464e0ae6e753c0428b8 # v0.22.0
+          ref: d923a5eb487a17c0a68801bba9ef0f56c81040a8 # v0.22.2
           path: .upstream/latest_stable
       - name: Checkout pinned Hermes latest_main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

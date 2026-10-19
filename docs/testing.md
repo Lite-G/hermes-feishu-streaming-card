@@ -36,6 +36,11 @@ Hermes main 兼容矩阵现固定到 `0ab43d4f67e41be75f4f6c0fa14a86dbcfd3e5b3`
 固定源码执行安装、重复安装、诊断及逐字节卸载恢复。此矩阵不代表真实
 Gateway/model 执行或飞书客户端验收。
 
+稳定版矩阵固定到 Hermes `v0.22.2` 的
+`d923a5eb487a17c0a68801bba9ef0f56c81040a8`。该版仍保留原 `run_turn.py`
+布局，因此 fixture 包含 12 个相关源码文件；main 的 persistence、prepare、hygiene
+拆分文件另外核验，不能把 main 的文件集合直接套用到稳定版。
+
 ```bash
 python3 -m pytest tests/unit -q
 ```

@@ -78,13 +78,13 @@
     }
   },
   "latest_stable": {
-    "commit": "e06df9c2eae6901f4c88f464e0ae6e753c0428b8",
+    "commit": "d923a5eb487a17c0a68801bba9ef0f56c81040a8",
     "source": "https://github.com/NousResearch/hermes-agent",
     "version": "unknown",
     "decomposed": true,
     "sha256": {
       "gateway/run.py": "5ae263b65d6c02226d079bf7be822b953150aa6a4bdce91745cc67da3e687316",
-      "gateway/run_turn.py": "649449454a479d199553354f0772346ce9a56c63da0c928633e8ef83f6e8bd63",
+      "gateway/run_turn.py": "0a7ae66ddad18ed4bd45651b389a9247ff587a4aa3d70d6625fc4ce31d156b75",
       "gateway/run_turn_runner.py": "6ec879a91aa09765515a69368c886d1ce4d3174b159868c966e8740e9cf1b347",
       "gateway/run_inbound.py": "f399c90076668e8745e19b640fdcd9a467bd07cc1217a33b38aca00cd38191c1",
       "gateway/run_busy.py": "a6247d2862216543ff1a2bcb2a97a0f51c40fa02604849e0c1f50f8546f64e59",
