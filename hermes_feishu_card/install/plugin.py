@@ -298,23 +298,26 @@ def enable_plugin(
         if enabled_before
         else expected
     )
+    desired = already_enabled_expected if enabled_before else expected
+    plan = _plan_enabled_config_bytes(binding, preimage, before_bytes, desired, enabled_before)
+    if _load_config_mapping(plan.postimage) not in (expected, already_enabled_expected):
+        raise PluginConfigRefused("official config byte plan changed unrelated config")
+    if _read_bound_config(binding) != before_bytes:
+        raise PluginConfigRefused("Hermes config changed after preimage")
+    _verify_config_plan_source(plan)
     try:
         return_code = _run_official_enable(binding)
     except Exception as exc:
-        _rollback_verified_enable(binding, before_bytes, expected, already_enabled_expected)
+        _verify_config_plan_source(plan)
+        _rollback_verified_enable(binding, before_bytes, plan.postimage)
         raise PluginConfigRefused("official plugin enable failed") from exc
+    _verify_config_plan_source(plan)
     after_bytes = _read_bound_config(binding)
-    after_sha256 = _sha256(after_bytes)
+    after_sha256 = _sha256(plan.postimage)
     if return_code != 0:
-        _rollback_verified_enable(binding, before_bytes, expected, already_enabled_expected)
+        _rollback_verified_enable(binding, before_bytes, plan.postimage)
         raise PluginConfigRefused("official plugin enable failed")
-    try:
-        after = _load_config_mapping(after_bytes)
-    except PluginConfigRefused:
-        # Invalid/partial bytes cannot be attributed to this enable transaction.
-        # Preserve them and the preimage for explicit recovery.
-        raise
-    if after != expected and after != already_enabled_expected:
+    if after_bytes != plan.postimage:
         raise PluginConfigRefused("official plugin enable changed unrelated config")
     added_by_hfc = after_bytes != before_bytes
     ownership = PluginOwnership(
@@ -333,27 +336,36 @@ def enable_plugin(
     return ownership
 
 
+def _plan_enabled_config_bytes(binding, preimage, before, desired, enabled_before):
+    from .plugin_config_bytes import ConfigBytesRefused, plan_enabled_bytes
+    try:
+        return plan_enabled_bytes(root=binding.checkout_root, python=binding.runtime_python,
+            home=binding.hermes_home, state_dir=preimage.state_dir, before=before,
+            desired=desired, enabled_before=enabled_before)
+    except ConfigBytesRefused as exc:
+        raise PluginConfigRefused("official config byte plan failed") from exc
+
+
+def _verify_config_plan_source(plan):
+    from .plugin_config_bytes import ConfigBytesRefused
+    try:
+        plan.verify_source()
+    except ConfigBytesRefused as exc:
+        raise PluginConfigRefused("official config writer contract is unknown") from exc
+
+
 def _rollback_verified_enable(
     binding: HermesRuntimeBinding,
     before_bytes: bytes,
-    expected: Mapping[str, object],
-    already_enabled_expected: Mapping[str, object],
+    planned_postimage: bytes,
 ) -> None:
-    """Only restore a postimage derived from this command's exact contract.
-
-    A freshly read hash proves the read, not ownership of concurrent user edits.
-    Unknown/partial writes retain their bytes and preimage rather than guessing.
-    """
+    """Only restore the exact postimage planned before official enable ran."""
     current = _read_bound_config(binding)
     if current == before_bytes:
         return
-    try:
-        config = _load_config_mapping(current)
-    except PluginConfigRefused as exc:
-        raise PluginConfigRefused("official plugin enable config is unknown; preserved for review") from exc
-    if config != expected and config != already_enabled_expected:
-        raise PluginConfigRefused("official plugin enable changed unrelated config")
-    _restore_exact_config(binding, before_bytes, expected_sha256=_sha256(current))
+    if current != planned_postimage:
+        raise PluginConfigRefused("official plugin enable config is unknown; preserved for review")
+    _restore_exact_config(binding, before_bytes, expected_sha256=_sha256(planned_postimage))
 
 
 def restore_plugin_config(
@@ -453,7 +465,7 @@ def _expected_enabled_config(
     if not (preserve_enabled_lists and enabled_before):
         plugins["enabled"] = sorted(set(enabled) | {PLUGIN_KEY})
         plugins["disabled"] = sorted(
-            set(disabled) - {PLUGIN_KEY, "hermes_feishu_card"}
+            set(disabled) - {PLUGIN_KEY}
         )
     entry = entries.get(PLUGIN_KEY)
     if entry is None:

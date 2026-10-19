@@ -346,7 +346,7 @@ Orphaned integrity fences can be explicitly rebound with `integrity acknowledge-
 
 官方 enable 命令失败与配置所有权拒绝分别呈现：preimage 后配置漂移、官方命令修改无关配置保留各自固定错误原因，便于定位。未知异常仍只显示 `official plugin enable failed`，不转发任意异常文本。原始异常通过 cause 保留供受控排查，配置恢复、prepared manifest 和源码写入门禁不变。
 
-Hermes 对已启用的插件可只更新 `allow_tool_override: false`，不排序启用列表，也不补写缺失的 `plugins.disabled`。安装器只在 preimage 已启用 HFC 时接受这个精确分支，同时保留原列表规范化分支；两种期望均在运行官方命令前从 preimage 派生。其他插件条目和非插件配置仍须完全一致。命令异常或非零退出时，只对从 preimage 精确派生并核验的官方 postimage 逐字回滚；未知、损坏或并发编辑的配置保留原字节和 preimage，拒绝继续源码写入。读取当前 hash 只证明读取结果，不能据此认领配置。不能通过忽略整个 `plugins` 区域或预先改写用户配置规避检查。
+Hermes 对已启用的插件可只更新 `allow_tool_override: false`，不排序启用列表，也不补写缺失的 `plugins.disabled`。安装器只在 preimage 已启用 HFC 时接受这个精确分支，同时保留原列表规范化分支；两种期望均在运行官方命令前从 preimage 派生。其他插件条目和非插件配置仍须完全一致。命令异常或非零退出时，只对从 preimage 精确派生并核验的官方 postimage 逐字回滚；未知、损坏或并发编辑的配置保留原字节和 preimage，拒绝继续源码写入。`install/plugin_config_bytes.py` 在执行官方 enable 前，用受检 fixed、v0.22.2 PM、pinned main 的真实 helper 和 serializer，在 0700 私有 HOME 中规划精确 postimage bytes；配置输入为 0600，结束即清理。成功出口、异常及非零出口都只能认领这些预期字节，YAML mapping 相等、注释/CRLF 等格式变化或新读出的 hash 均不能证明所有权。writer 源码、调用分支或间接 serializer 未知时拒绝。规划不启动 PM resolver 或插件；仅在受检 config import 的可选 setup 提示元数据路径临时拒绝 provider metadata，真实官方 CLI 不替换。真实 CLI 与规划的逐字对照覆盖三个固定源码族及 fresh、already-enabled、canonical-disabled 分支；该证据不覆盖上游命令自身读写之间已经丢失的并发编辑。读取当前 hash 只证明读取结果，不能据此认领配置。不能通过忽略整个 `plugins` 区域或预先改写用户配置规避检查。
 
 
 ## 官方插件的本轮 footer 指标

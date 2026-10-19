@@ -164,7 +164,9 @@
       "tests/unit/test_plugin_turn_metrics.py",
       "tests/unit/test_clarify_timeout_status.py",
       "tests/unit/test_clarify_timeout_admission.py",
-      "tests/integration/test_legacy_observer_install.py"
+      "tests/integration/test_legacy_observer_install.py",
+      "tests/integration/test_plugin_config_bytes.py",
+      "tests/unit/test_plugin_config_bytes.py"
     ],
     "storage": [
       "tests/unit/test_session_store.py",
@@ -630,6 +632,10 @@
     "hermes_feishu_card/install/legacy_observer.py": [
       "install",
       "runtime"
+    ],
+    "hermes_feishu_card/install/plugin_config_bytes.py": [
+      "plugin",
+      "install"
     ]
   }
 }

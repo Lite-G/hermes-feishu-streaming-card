@@ -29,6 +29,12 @@ FIXED_SOURCE_ROOT = Path(
 )
 
 
+@pytest.fixture(autouse=True)
+def expected_test_process_bytes(monkeypatch):
+    monkeypatch.setattr(plugin, "_plan_enabled_config_bytes", lambda b, p, raw, desired, enabled:
+        SimpleNamespace(postimage=yaml.safe_dump(desired).encode(), verify_source=lambda: None))
+
+
 def _fixture(tmp_path: Path):
     root = tmp_path / "home" / "hermes-agent"
     for target in v3.HYBRID_PATCH_TARGET_ORDER:

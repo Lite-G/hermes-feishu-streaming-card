@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import stat
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -213,6 +214,10 @@ def test_entrypoint_probe_rejects_missing_duplicate_editable_or_wrong_version(
 
 def _binding(tmp_path: Path, monkeypatch, config_text: str) -> plugin.HermesRuntimeBinding:
     checkout, home = _checkout(tmp_path)
+    # Pure transaction tests inject a known byte-writing process contract. Real
+    # writer planning is covered separately by pinned upstream integration.
+    monkeypatch.setattr(plugin, "_plan_enabled_config_bytes", lambda b, p, raw, desired, enabled:
+        SimpleNamespace(postimage=yaml.safe_dump(desired).encode(), verify_source=lambda: None))
     (home / "config.yaml").write_text(config_text, encoding="utf-8")
     monkeypatch.setattr(
         plugin, "_probe_runtime_identity", lambda launcher: _runtime_payload(checkout)
@@ -307,6 +312,9 @@ def test_restore_plugin_config_refuses_postimage_drift(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(plugin, "_run_official_enable", official_enable)
+    postimage = b"plugins:\n  enabled: [hermes-feishu-card]\n  disabled: []\n  entries:\n    hermes-feishu-card:\n      allow_tool_override: false\n"
+    monkeypatch.setattr(plugin, "_plan_enabled_config_bytes", lambda *a:
+        SimpleNamespace(postimage=postimage, verify_source=lambda: None))
     ownership = plugin.enable_plugin(binding, preimage)
     binding.config_path.write_text("plugins: {}\nuser_change: true\n", encoding="utf-8")
 
@@ -359,6 +367,11 @@ def test_enable_plugin_accepts_exact_already_enabled_official_branch(
     binding = _binding(tmp_path, monkeypatch, original)
     preimage = plugin.prepare_plugin_config(binding)
     calls = []
+    if normalize_lists:
+        def normalized_plan(candidate, _preimage, before, desired, enabled):
+            expected, _ = plugin._expected_enabled_config(yaml.safe_load(before))
+            return SimpleNamespace(postimage=yaml.safe_dump(expected).encode(), verify_source=lambda: None)
+        monkeypatch.setattr(plugin, "_plan_enabled_config_bytes", normalized_plan)
 
     def official_enable(candidate):
         calls.append(candidate)

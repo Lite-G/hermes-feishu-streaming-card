@@ -140,6 +140,8 @@ def installed(tmp_path, monkeypatch):
     binding = plugin.HermesRuntimeBinding(root, Path(sys.executable), Path(sys.executable),
         "sha256:" + "a" * 64, home, home / "config.yaml", root, root)
     monkeypatch.setattr(plugin, "resolve_runtime_binding", lambda **_: binding)
+    monkeypatch.setattr(plugin, "_plan_enabled_config_bytes", lambda b, p, raw, desired, enabled:
+        SimpleNamespace(postimage=yaml.safe_dump(desired).encode(), verify_source=lambda: None))
     monkeypatch.setattr(plugin, "probe_plugin_entrypoint", lambda _: SimpleNamespace(status="verified"))
     calls = []
     def enable(_):

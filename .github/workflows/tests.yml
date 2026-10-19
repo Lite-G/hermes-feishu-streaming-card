@@ -142,6 +142,15 @@ jobs:
           python -m venv --system-site-packages "$RUNNER_TEMP/hfc-official-runtime"
           "$RUNNER_TEMP/hfc-official-runtime/bin/python" -m pip install --force-reinstall --no-deps "$HFC_TEST_WHEEL"
           printf 'HFC_LEGACY_PLUGIN_PYTHON=%s\n' "$RUNNER_TEMP/hfc-official-runtime/bin/python" >> "$GITHUB_ENV"
+      - name: Verify exact config writer bytes before official enable
+        env:
+          HFC_LEGACY_PLUGIN_SOURCE_ROOT: ${{ github.workspace }}/.upstream/latest_stable
+          HFC_UPSTREAM_LATEST_MAIN_ROOT: ${{ github.workspace }}/.upstream/latest_main
+          HFC_REQUIRE_LEGACY_PLUGIN_INSTALL: "1"
+          HFC_REQUIRE_CONFIG_WRITER_CONTRACT: "1"
+        run: >-
+          python -m pytest tests/integration/test_plugin_config_bytes.py
+          --basetemp=${{ runner.temp }}/hfc-config-writer-pytest -q -s
       - name: Verify pinned official plugin enable, discovery and exact legacy recovery
         env:
           HFC_LEGACY_PLUGIN_SOURCE_ROOT: ${{ github.workspace }}/.upstream/latest_stable
