@@ -171,10 +171,10 @@ def test_official_actions_are_sha_pinned_to_node24_capable_releases():
     expected = {
         "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
         "actions/setup-python": "5fda3b95a4ea91299a34e894583c3862153e4b97",
-        "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-        "github/codeql-action/init": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "github/codeql-action/analyze": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
+        "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+        "actions/download-artifact": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+        "github/codeql-action/init": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "github/codeql-action/analyze": "24c54180a607b1449ed407dd24f251e4e9147c8d",
     }
     workflow_paths = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 

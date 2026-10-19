@@ -25,6 +25,7 @@ from .session import (
 )
 from .status import StatusConfig, resolve_display_status
 from .subscription_usage import uses_codex_subscription
+from .turn_metrics import retained_output_rate
 from .card_view import TASK_TEXT_SIZE_DEFAULTS, task_presentation
 from .presentation import (
     apply_task_presentation, task_interaction_prompt,
@@ -2755,6 +2756,7 @@ def _render_footer(
             f"{_format_count(max_context)} {context_percent}%"
         ),
         "subscription_usage": subscription_usage,
+        "output_rate": _format_output_rate(tokens),
     }
     selected = []
     if session.tool_count and not compact:
@@ -2768,6 +2770,7 @@ def _render_footer(
         "output_tokens": "output_tokens" in tokens,
         "context": max_context > 0 and "used_tokens" in context,
         "subscription_usage": bool(subscription_usage),
+        "output_rate": bool(values["output_rate"]),
     }
     fields = [field for field in fields if available.get(field, False)]
     for field in fields:
@@ -2783,6 +2786,16 @@ def _render_footer(
     # behind it) is gone — the user asked for it to leave the footer, and the completed state plus
     # the header sub-title / native completion line already carry it.
     return f"{pill} · {detail}" if pill else detail
+
+
+def _format_output_rate(tokens: Dict[str, Any]) -> str:
+    """Validated observed-window rate with its stream or request timing label."""
+    validated = retained_output_rate(tokens)
+    if validated is None:
+        return ""
+    rate, basis = validated
+    shown = f"{rate:.2g}" if rate < 1 else str(int(round(rate)))
+    return f"~{shown} tok/s (流式)" if basis == "decode" else f"~{shown} tok/s (含TTFT)"
 
 
 def _colored_model_label(model: str) -> str:

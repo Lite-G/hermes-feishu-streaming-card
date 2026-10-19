@@ -1,5 +1,15 @@
 # Changelog
 
+## v5.0.3 — 2026-10-19
+
+- Accept only the verified old/new Hermes channel-pin inheritance expressions while retaining strict binding, ordering and restore checks (#437, PR #438). Pin the compatibility matrix to main `0ab43d4f67e41be75f4f6c0fa14a86dbcfd3e5b3`.
+- Add opt-in `output_rate` completion-footer metrics from matching per-invocation usage/timing (PR #436, phase one of #392). Hide unavailable, malformed or mixed-model samples; preserve defaults and checkpoint schema.
+- Create a lazy continuation after an expired interaction so subsequent output follows the native fallback question, including sidecar-first expiry; preserve original resolution and stale/duplicate rejection (PR #430).
+- Update pinned official GitHub Actions and Ruff 0.17.1 (#388, #389, #390, #439).
+- Thanks to Lite-G and Thxzzzzz for their code, reports and tests, and Dependabot for dependency updates. Original commits and historical credits remain intact.
+
+See [Chinese release notes](docs/release-notes-v5.0.3.md) and [English release notes](docs/release-notes-v5.0.3.en.md) for verification scope.
+
 ## v5.0.2 — 2026-10-17
 
 - Recall exact known en/zh redirect, interrupt and steer receipts (including active-subagent steering) through the same busy-entry and delay classifier; support the bare simplified-Chinese compression status (#434).

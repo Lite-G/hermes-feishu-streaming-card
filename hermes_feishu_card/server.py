@@ -148,8 +148,9 @@ from .render import (
 )
 from .process import state_dir
 from .session import CardSession
+from .turn_metrics import retained_output_rate
 from .approval_receipts import approval_receipt_fingerprint
-from .display_segments import display_view, needs_continuation
+from .display_segments import begin_continuation, display_view, needs_continuation
 from .legacy_owner import (auxiliary_receipt_card,
                            static_legacy_receipt)
 from .status import StatusConfig
@@ -938,7 +939,13 @@ async def _health(request: web.Request) -> web.Response:
         "package_version": request.app[PACKAGE_VERSION_KEY],
         "python_identity": request.app[PYTHON_IDENTITY_KEY],
         "metrics": metrics.snapshot(),
-        "timing": timing_summary(session.observation for session in sessions.values()),
+        "timing": timing_summary(
+            (session.observation for session in sessions.values()),
+            rate_samples=sum(
+                1 for session in sessions.values()
+                if retained_output_rate(session.tokens) is not None
+            ),
+        ),
         "reply_index": {
             "entries": len(request.app[CARD_SUMMARIES_KEY]),
             "last_lookup": _sanitize_health_diagnostics(diagnostics.get("last_reply_lookup", {})),
@@ -6348,6 +6355,11 @@ def _mark_interaction_expired_locked(
     interaction = session.active_interaction
     if interaction is not None and interaction.status == "paused":
         _schedule_paused_approval_card(app, session_key, session, interaction)
+    elif (interaction is not None and interaction.status == "failed"
+          and session.display_segment.get("interaction_id") != interaction.interaction_id):
+        # Local expiry can precede Hermes' failure event. Establish the same
+        # lazy boundary here, without resetting an already opened segment.
+        begin_continuation(session)
     card_config = app[SESSION_CARD_CONFIGS_KEY].get(session_key, {})
     session.refresh_display_status_source(
         StatusConfig.from_mapping(card_config.get("status"))

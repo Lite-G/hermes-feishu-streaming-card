@@ -608,7 +608,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 
 ## Docker 容器内安装 / 更新
 
-以下示例固定 `v5.0.2`；默认 `latest` 解析已发布稳定版。本版的兼容与验收范围见[发行说明](release-notes-v5.0.2.md)。
+以下示例固定 `v5.0.3`；默认 `latest` 解析已发布稳定版。本版的兼容与验收范围见[发行说明](release-notes-v5.0.3.md)。
 
 如果 Hermes 运行在已有 Docker 容器里，优先使用 `install-docker.sh`。它默认读取：
 
@@ -617,7 +617,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 | `HERMES_DIR` | `/opt/hermes` | 容器内 Hermes Agent Gateway 目录 |
 | `HFC_CONFIG` | `/opt/data/config.yaml` | sidecar 配置路径 |
 | `HFC_ENV_FILE` | `/opt/data/.env` | 飞书凭据文件 |
-| `HFC_VERSION` | `latest`（脚本）/ `v5.0.2`（Compose 示例） | 指定安装 tag 或分支 |
+| `HFC_VERSION` | `latest`（脚本）/ `v5.0.3`（Compose 示例） | 指定安装 tag 或分支 |
 | `HFC_PYTHON` | 自动检测 Hermes venv | 显式指定容器内 Python |
 
 示例：
@@ -625,7 +625,7 @@ python3 -m hermes_feishu_card.cli status --config ~/.hermes/config.yaml
 ```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=xxx
-export HFC_VERSION=v5.0.2
+export HFC_VERSION=v5.0.3
 bash install-docker.sh --profile-id child --event-url http://hfc-sidecar:8765/events
 ```
 
@@ -808,7 +808,9 @@ card:
   footer_fields: [duration, model, input_tokens, output_tokens, context]
 ```
 
-多 Profile 模式下，`FEISHU_APP_ID` / `FEISHU_APP_SECRET` 不会覆盖 profile 内的 `feishu` 配置。`footer_fields` 支持 `duration`、`model`、`input_tokens`、`output_tokens`、`context`、`subscription_usage`。其中 `subscription_usage` 默认关闭；显式加入后，仅在本轮 GPT 模型明确归属 `openai-codex` 时，通过 Hermes runtime 的 `fetch_account_usage("openai-codex")` 显示 `5h 26% · weekly 89%` 风格的剩余额度。归属来自本轮 `provider` 或 `openai-codex/gpt-…` 模型标识；只知道裸 GPT 名称不足以区分订阅与 API key。非 GPT、其他 provider、未知模型/归属都不查询、不显示这份额度，切换模型不会沿用上一轮额度。旧 Hermes 未报告归属、未登录、网络错误或超时会静默跳过。
+多 Profile 模式下，`FEISHU_APP_ID` / `FEISHU_APP_SECRET` 不会覆盖 profile 内的 `feishu` 配置。`footer_fields` 支持 `duration`、`model`、`input_tokens`、`output_tokens`、`context`、`subscription_usage`、`output_rate`。其中 `subscription_usage` 默认关闭；显式加入后，仅在本轮 GPT 模型明确归属 `openai-codex` 时，通过 Hermes runtime 的 `fetch_account_usage("openai-codex")` 显示 `5h 26% · weekly 89%` 风格的剩余额度。归属来自本轮 `provider` 或 `openai-codex/gpt-…` 模型标识；只知道裸 GPT 名称不足以区分订阅与 API key。非 GPT、其他 provider、未知模型/归属都不查询、不显示这份额度，切换模型不会沿用上一轮额度。旧 Hermes 未报告归属、未登录、网络错误或超时会静默跳过。
+
+`output_rate` 同样默认关闭，仅显示在完成卡片页脚。它用本轮各次模型调用的实际 `output_tokens` 之和除以对应观测窗口之和：流式调用取首个 chunk/event 到响应结束，显示 `~42 tok/s (流式)`；首事件可能是 role、reasoning 或 lifecycle 帧，因此不是纯答案解码速度。没有首 chunk 时间时使用整次请求耗时，显示 `~42 tok/s (含TTFT)`，该耗时还可能包含重试等待。调用间的工具执行与等待不计入，同一 `api_request_id` 只记一次。任一调用缺少 usage 或有效时间、模型/provider 切换、MoA 聚合调用（usage 不含各 advisor）、输出少于 20 tokens 或总窗口不足 0.3 秒时隐藏，不用文本长度估算。数据来自 Hermes `post_api_request` 的 `usage`、`started_at`、`ended_at`、`first_chunk_at`、`api_duration`。运行中的实时速率未实现；详见[观测口径](wiki/observed-timing.md)。
 
 ### 卡片宽度
 

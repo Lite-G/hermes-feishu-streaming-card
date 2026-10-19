@@ -18,6 +18,8 @@ V4.6.4 已发布，使 clarify 和 approval 之后的结果按聊天创建时间
 4. 新续答发送使用绑定 interaction 与边界序号的稳定 delivery key，继承 bot/profile/chat/thread、reply anchor 与 `reply_in_thread`。先停止旧动画，只有确认送达才切换 `FEISHU_MESSAGE_IDS_KEY` 并保存检查点。
 5. 后续流式 PATCH 只更新当前显示 owner。原交互卡保留回执，旧题 token、重复/迟到选择不得作用于下一题。
 
+交互失败或过期后也建立同一按需续答边界，使原生回退问题之后的实际输出落在新卡。sidecar 本地过期可能先于 Hermes 的失败事件；两种顺序均保留同一边界，重复或迟到失败不重置已送达续答。暂停审批仍冻结输入并等待原有明确选择，任务终态关闭未决交互本身不创建空卡。
+
 `display_view` 是展示投影，不清空 canonical 历史。增量段只展示本段答案和相关活动；完整终局快照会以“本轮完整结果”标记并完整保留。不能通过文本前缀猜测删掉旧内容。续答段数有界，达到预算后保留既有 owner 与完整内容，不无限开卡。
 
 ## 失败、唯一 legacy owner 与重启

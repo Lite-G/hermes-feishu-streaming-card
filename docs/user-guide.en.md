@@ -578,21 +578,21 @@ High-frequency streaming knobs usually do not need manual tuning:
 
 ## Docker Containers
 
-Examples pin `v5.0.2`; the default `latest` resolves the published stable release. See [release notes](release-notes-v5.0.2.en.md) for validation boundaries.
+Examples pin `v5.0.3`; the default `latest` resolves the published stable release. See [release notes](release-notes-v5.0.3.en.md) for validation boundaries.
 
 Use `install-docker.sh` inside an existing Hermes container. It defaults to
 `/opt/hermes` for Hermes and `/opt/data/config.yaml` for sidecar config. The
 script selects Hermes venv Python and does not fall back to system Python unless
 `HFC_PYTHON` is set.
 
-The Compose example defaults `HFC_VERSION` to `v5.0.2`.
+The Compose example defaults `HFC_VERSION` to `v5.0.3`.
 
 Example:
 
 ```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=xxx
-export HFC_VERSION=v5.0.2
+export HFC_VERSION=v5.0.3
 bash install-docker.sh --profile-id child --event-url http://hfc-sidecar:8765/events
 ```
 
@@ -753,7 +753,9 @@ card:
   footer_fields: [duration, model, input_tokens, output_tokens, context]
 ```
 
-In multi-profile mode, `FEISHU_APP_ID`/`FEISHU_APP_SECRET` env vars are ignored. `footer_fields` accepts: `duration`, `model`, `input_tokens`, `output_tokens`, `context`, `subscription_usage`. `subscription_usage` is disabled by default. When enabled, only completed GPT turns attributed to `openai-codex` use Hermes runtime `fetch_account_usage("openai-codex")` to show remaining quota in the `5h 26% · weekly 89%` style. Attribution comes from the turn's `provider` or an `openai-codex/gpt-…` model identifier; a bare GPT name cannot distinguish subscription use from an API key. Non-GPT models, other providers and unknown routes neither fetch nor display this quota, and model changes do not carry it to the next turn. Older Hermes versions without route metadata, missing login, network errors, and timeouts silently omit it.
+In multi-profile mode, `FEISHU_APP_ID`/`FEISHU_APP_SECRET` env vars are ignored. `footer_fields` accepts: `duration`, `model`, `input_tokens`, `output_tokens`, `context`, `subscription_usage`, `output_rate`. `subscription_usage` is disabled by default. When enabled, only completed GPT turns attributed to `openai-codex` use Hermes runtime `fetch_account_usage("openai-codex")` to show remaining quota in the `5h 26% · weekly 89%` style. Attribution comes from the turn's `provider` or an `openai-codex/gpt-…` model identifier; a bare GPT name cannot distinguish subscription use from an API key. Non-GPT models, other providers and unknown routes neither fetch nor display this quota, and model changes do not carry it to the next turn. Older Hermes versions without route metadata, missing login, network errors, and timeouts silently omit it.
+
+`output_rate` is disabled by default and appears only in the completion card footer. It divides the turn's actual output tokens by the summed observation windows of its model invocations. Streamed calls use the first accepted chunk/event through response end, shown as `~42 tok/s (流式)`. That event may contain role metadata, reasoning or a Responses lifecycle frame, so this is not pure answer decoding speed. Without a first-chunk timestamp it uses the whole request duration, shown as `~42 tok/s (含TTFT)`; this can also include retry waits. Tool execution and waits between invocations are excluded; duplicate request IDs count once. Missing usage or valid timing, model/provider changes, MoA aggregator calls, fewer than 20 output tokens or a total window below 0.3 seconds hide the field. It is never estimated from text length. Data comes from Hermes `post_api_request` usage and invocation timestamps. A live rate while the turn runs is not implemented. See [timing definitions](wiki/observed-timing.md).
 
 ### Card width
 

@@ -2,11 +2,11 @@
 
 [中文](release-readiness.md) | [English](release-readiness.en.md)
 
-This branch targets `5.0.2`; published availability is determined by the GitHub Release tag and assets. Opt-in native tables preserve oversized cells via Markdown fallback; indivisible Markdown tables retain their full source for the shared payload/handoff gate.
+This branch targets `5.0.3`; published availability is determined by the GitHub Release tag and assets. Opt-in native tables preserve oversized cells via Markdown fallback; indivisible Markdown tables retain their full source for the shared payload/handoff gate.
 
-For #434, candidate `74f409e` passed 146 focused tests, local full regression (6687 passed / 33 skipped) and all 18 CI checks. Version 5.0.2 metadata and exact merge/tag gates are separate checks. No new real Feishu or client visual acceptance is claimed.
+This batch integrates verified Hermes channel-pin inheritance (PR #438), opt-in per-invocation output rate (PR #436), and expired-interaction continuation (PR #430), with additional malformed-data and sidecar-first-expiry regressions. Exact-candidate full tests, platform CI, ordinary wheels, public installation and assets remain release gates. Real Gateway/model and client evidence are recorded separately.
 
-Full tests, exact-merge CI, assets/checksums and public-tag installation remain release gates. See [release notes](release-notes-v5.0.2.en.md) and the [acceptance record](reviews/2026-10-03-task-cards-acceptance.md). Platform API smoke, real Gateway execution, desktop visuals and Android/iOS acceptance are separate evidence; missing coverage is not a pass.
+Full tests, exact-merge CI, assets/checksums and public-tag installation remain release gates. See [release notes](release-notes-v5.0.3.en.md) and the [acceptance record](reviews/2026-10-03-task-cards-acceptance.md). Platform API smoke, real Gateway execution, desktop visuals and Android/iOS acceptance are separate evidence; missing coverage is not a pass.
 
 
 V3.9.0 was released on 2026-07-11, and V3.9.1 was released on 2026-07-11. The V4.0.13 all-command lifecycle remains intact; V4.2.0 narrows only a private-chat bare `/update` into the stricter dedicated maintenance card.

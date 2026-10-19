@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .observations import TurnObservation
+from .turn_metrics import RATE_MIN_OUTPUT_TOKENS, completion_output_rate, metric_count
 
 from dataclasses import dataclass, field, replace
 from copy import deepcopy
@@ -497,7 +498,10 @@ class CardSession:
         elif event.event == "interaction.completed":
             self._complete_interaction(event.data)
         elif event.event == "interaction.failed":
-            self._fail_interaction(event.data)
+            # Hermes re-asks a failed or expired interaction natively below this
+            # card, so the rest of the turn continues below that question too.
+            if self._fail_interaction(event.data):
+                begin_continuation(self)
         elif event.event == "system.notice":
             title = str(event.data.get("title") or "运行提示").strip() or "运行提示"
             is_runtime_phase = (
@@ -559,6 +563,13 @@ class CardSession:
                 self.reply_to_message_id = reply_to_message_id
             tokens = event.data.get("tokens", {})
             self.tokens = dict(tokens) if isinstance(tokens, dict) else {}
+            self.tokens.pop("output_tps", None)
+            self.tokens.pop("rate_basis", None)
+            rate = completion_output_rate(event.data.get("rate"))
+            count = metric_count(self.tokens.get("output_tokens"))
+            if rate is not None and count is not None and count >= RATE_MIN_OUTPUT_TOKENS:
+                # Kept inside the persisted tokens mapping so checkpoints keep their schema.
+                self.tokens["output_tps"], self.tokens["rate_basis"] = rate
             model = event.data.get("model")
             self.model = model if isinstance(model, str) and model.strip() else "Unknown"
             provider = event.data.get("provider")
@@ -721,17 +732,19 @@ class CardSession:
 
         begin_continuation(self)
 
-    def _fail_interaction(self, data: dict[str, Any]) -> None:
+    def _fail_interaction(self, data: dict[str, Any]) -> bool:
+        """Mark the active interaction failed; False when it was not the open one."""
         interaction_id = str(data.get("interaction_id") or "").strip()
         if self.active_interaction is None or (
             interaction_id and interaction_id != self.active_interaction.interaction_id
         ):
-            return
+            return False
         if self.active_interaction.status not in {"pending", "paused"}:
-            return
+            return False
         self.active_interaction.status = "failed"
         self.active_interaction.error = str(data.get("error") or "交互请求失败").strip()
         self.active_interaction.runtime_admission = None
+        return True
 
 
 def _interaction_from_event_data(

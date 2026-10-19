@@ -57,11 +57,16 @@ async def request_first(http, app, *, complete=True, description=""):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal", ["completed", "failed"])
-async def test_first_legacy_owner_retains_receipt_and_content_when_continuation_create_fails(terminal):
+@pytest.mark.parametrize("interaction_outcome", ["completed", "failed"])
+async def test_first_legacy_owner_retains_receipt_and_content_when_continuation_create_fails(terminal, interaction_outcome):
     client = Client()
     app = create_app(client, card_config={"interaction_mode": "callback", "flush_interval_ms": 0})
     async with TestClient(TestServer(app)) as http:
-        await request_first(http, app)
+        await request_first(http, app, complete=False)
+        await post(http, f"interaction.{interaction_outcome}", 2, {
+            "interaction_id": "q1", "choice": "a", "choice_label": "ORIGINAL_CHOICE",
+            "error": "交互已过期",
+        })
         client.fail_create = True
         await post(http, "answer.delta", 3, {"text": "PRESERVED_PARTIAL"})
         await asyncio.sleep(.03)
@@ -72,7 +77,8 @@ async def test_first_legacy_owner_retains_receipt_and_content_when_continuation_
         assert not client.cross_dialect
         card = client.updated[-1][1]
         assert card.get("schema") is None
-        assert all(text in str(card) for text in ["ORIGINAL_QUESTION", "ORIGINAL_CHOICE", "PRESERVED_PARTIAL", "FINAL_RESULT" if terminal == "completed" else "FAILURE_REASON"])
+        receipt_result = "ORIGINAL_CHOICE" if interaction_outcome == "completed" else "交互已过期"
+        assert all(text in str(card) for text in ["ORIGINAL_QUESTION", receipt_result, "PRESERVED_PARTIAL", "FINAL_RESULT" if terminal == "completed" else "FAILURE_REASON"])
         assert inspect_card_limits(card).safe
         assert len(client.sent) == 1
         assert app[SESSIONS_KEY]["turn"].terminal_delivery_state == "delivered"
@@ -137,18 +143,24 @@ async def test_legacy_owner_restart_keeps_static_receipt_without_callback_tokens
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("description,answer", [("", "大段结果\n" * 2400), ("scope " * 2500, "result " * 2200)], ids=["oversized-answer", "receipt-pushes-over-limit"])
-async def test_failed_continuation_legacy_owner_uses_native_handoff_for_large_final_answer(description, answer):
+@pytest.mark.parametrize("interaction_outcome", ["completed", "failed"])
+async def test_failed_continuation_legacy_owner_uses_native_handoff_for_large_final_answer(description, answer, interaction_outcome):
     client = Client()
     app = create_app(client, card_config={"interaction_mode": "callback", "flush_interval_ms": 0})
     async with TestClient(TestServer(app)) as http:
-        await request_first(http, app, description=description)
+        await request_first(http, app, complete=False, description=description)
+        await post(http, f"interaction.{interaction_outcome}", 2, {
+            "interaction_id": "q1", "choice": "a", "choice_label": "ORIGINAL_CHOICE",
+            "error": "交互已过期",
+        })
         client.fail_create = True
         await post(http, "answer.delta", 3, {"text": "SHORT_PARTIAL"})
         result = await post(http, "message.completed", 4, {"answer": answer})
         assert result["applied"] is False and result["disposition"] == "native"
         assert not client.cross_dialect
         assert "ORIGINAL_QUESTION" in str(client.updated[-1][1])
-        assert "ORIGINAL_CHOICE" in str(client.updated[-1][1])
+        receipt_result = "ORIGINAL_CHOICE" if interaction_outcome == "completed" else "交互已过期"
+        assert receipt_result in str(client.updated[-1][1])
         assert inspect_card_limits(client.updated[-1][1]).safe
 
 

@@ -37,6 +37,7 @@ jobs:
         run: python -m mypy
 
   upstream-hermes-compat:
+    needs: fixed-hermes-fixture
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,6 +50,17 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Download immutable Hermes fixed-tag fixture
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hermes-v2026.8.3-fixed-tag
+          path: ${{ runner.temp }}
+      - name: Restore Hermes lifecycle hook fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "$RUNNER_TEMP/hermes-v2026.8.3-fixed-tag.tar.gz" -C "$RUNNER_TEMP"
+          printf 'HFC_FIXED_TAG_SOURCE_ROOT=%s\n' "$RUNNER_TEMP/hermes-agent-v2026.8.3-v430-audit" >> "$GITHUB_ENV"
       - name: Checkout earlier supported Hermes release fixture
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,13 +101,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NousResearch/hermes-agent
-          ref: e06df9c2eae6901f4c88f464e0ae6e753c0428b8 # v0.22.0
+          ref: d923a5eb487a17c0a68801bba9ef0f56c81040a8 # v0.22.2
           path: .upstream/latest_stable
       - name: Checkout pinned Hermes latest_main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: NousResearch/hermes-agent
-          ref: 0e427d788d253630d38a3a51cd76849e73cd6925 # main observed 2026-10-14
+          ref: 0ab43d4f67e41be75f4f6c0fa14a86dbcfd3e5b3 # main observed 2026-10-17
           path: .upstream/latest_main
       - name: Checkout reported Hermes issue 428 revision 297552
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +136,12 @@ jobs:
           HFC_UPSTREAM_ISSUE428_297552_ROOT: ${{ github.workspace }}/.upstream/issue428_297552
           HFC_UPSTREAM_ISSUE428_7BDA2A_ROOT: ${{ github.workspace }}/.upstream/issue428_7bda2a
         run: python -m pytest tests/integration/test_upstream_hermes_compat.py -q
+      - name: Verify pinned per-invocation rate and stream timestamp contracts
+        env:
+          HFC_UPSTREAM_LATEST_STABLE_ROOT: ${{ github.workspace }}/.upstream/latest_stable
+          HFC_UPSTREAM_LATEST_MAIN_ROOT: ${{ github.workspace }}/.upstream/latest_main
+          HFC_REQUIRE_UPSTREAM_RATE_CONTRACT: "1"
+        run: python -m pytest tests/unit/test_plugin_turn_metrics.py -k "upstream_post_api_request or upstream_rate_timestamps" -q
       - name: Prepare ordinary wheel
         shell: bash
         run: |
@@ -162,7 +180,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/hermes-v2026.8.3-fixed-tag.tar.gz" \
             -C "$RUNNER_TEMP" hermes-agent-v2026.8.3-v430-audit
       - name: Upload immutable Hermes fixed-tag fixture
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hermes-v2026.8.3-fixed-tag
           path: ${{ runner.temp }}/hermes-v2026.8.3-fixed-tag.tar.gz
@@ -187,7 +205,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Download immutable Hermes fixed-tag fixture
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: hermes-v2026.8.3-fixed-tag
           path: ${{ runner.temp }}
@@ -265,7 +283,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Download immutable Hermes fixed-tag fixture
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: hermes-v2026.8.3-fixed-tag
           path: ${{ runner.temp }}
@@ -337,7 +355,7 @@ jobs:
         env:
           FEISHU_APP_ID: cli_test_only
           FEISHU_APP_SECRET: test_only_not_a_real_secret
-          HFC_VERSION: v5.0.2
+          HFC_VERSION: v5.0.3
         run: docker compose -f docker-compose.example.yml config --quiet
       - name: Start published Compose smoke topology
         run: >-
