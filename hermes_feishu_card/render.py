@@ -2789,7 +2789,7 @@ def _render_footer(
 
 
 def _format_output_rate(tokens: Dict[str, Any]) -> str:
-    """Exact per-invocation output rate; request basis includes time to first token."""
+    """Validated observed-window rate with its stream or request timing label."""
     validated = retained_output_rate(tokens)
     if validated is None:
         return ""
