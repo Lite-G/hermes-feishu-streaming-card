@@ -301,6 +301,8 @@ def enable_plugin(
     try:
         return_code = _run_official_enable(binding)
     except Exception as exc:
+        current = _read_bound_config(binding)
+        _restore_exact_config(binding, before_bytes, expected_sha256=_sha256(current))
         raise PluginConfigRefused("official plugin enable failed") from exc
     after_bytes = _read_bound_config(binding)
     after_sha256 = _sha256(after_bytes)
@@ -324,7 +326,11 @@ def enable_plugin(
         config_backup_id=preimage.config_backup_id,
         backup_sha256=preimage.backup_sha256,
     )
-    _rewrite_private_journal(preimage, phase="plugin_enabled", ownership=ownership)
+    try:
+        _rewrite_private_journal(preimage, phase="plugin_enabled", ownership=ownership)
+    except Exception:
+        _restore_exact_config(binding, before_bytes, expected_sha256=after_sha256)
+        raise
     return ownership
 
 
@@ -575,7 +581,12 @@ def _atomic_replace_bytes(path: Path, value: bytes, mode: int) -> None:
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary_path = Path(temporary)
     try:
-        os.fchmod(descriptor, mode)
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, mode)
+        else:
+            # mkstemp created this private regular file exclusively; Windows
+            # exposes chmod by path, not by descriptor.
+            temporary_path.chmod(mode)
         with os.fdopen(descriptor, "wb", closefd=False) as file:
             file.write(value)
             file.flush()

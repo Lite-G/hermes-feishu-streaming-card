@@ -10597,6 +10597,9 @@ def _event_data(
             "tokens": _completion_tokens(local_vars, answer),
             "context": _completion_context(local_vars),
         })
+        rate = _completion_observed_rate(local_vars)
+        if rate is not None:
+            data["rate"] = rate
         delivery_kind = _first_string(local_vars, ("delivery_kind",))
         if delivery_kind:
             data["delivery_kind"] = delivery_kind
@@ -11347,6 +11350,33 @@ def effective_response_model(agent: Any) -> str:
         if not model.startswith(provider + "/"):
             return f"{provider}/{model}"
     return model
+
+
+def _completion_observed_rate(local_vars):
+    """Consume display observations without making delivery depend on the plugin."""
+    try:
+        from .turn_metrics import RATE_MIN_OUTPUT_TOKENS, completion_output_rate, metric_count
+        result = local_vars.get("agent_result")
+        if type(result) is not dict:
+            return None
+        runtime = _plugin_runtime()
+        if runtime is None:
+            return None
+        observed = runtime.take_observed_rate(result.get("session_id"))
+        if observed is None:
+            return None
+        rate, count = observed
+        # Legacy footer counts can be session-cumulative on cached agents.
+        # Only the independently validated per-invocation observations qualify.
+        exact = metric_count(count)
+        if exact is None or exact < RATE_MIN_OUTPUT_TOKENS:
+            return None
+        validated = completion_output_rate(rate)
+        if validated is None:
+            return None
+        return {"output_tps": validated[0], "basis": validated[1]}
+    except Exception:
+        return None
 
 
 def _completion_tokens(local_vars: dict[str, Any], answer: str) -> dict[str, int]:

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Supply opt-in `output_rate` on eligible legacy Hermes installs through an observe-only official plugin. Legacy remains the sole event producer; rates use exact per-invocation usage independently of cumulative legacy footer counts. Bound observations by TTL/capacity, reclaim consumed entries under pressure, and hide unknown, mixed-route or isolated-host samples.
+- Keep shared plugin-config rollback on official-enable exceptions and journal failure for both legacy and Hybrid v3; support private atomic writes without `os.fchmod` on Windows. Add read-only observer admission diagnostics and preserve Hybrid bootstrap when no observer marker can be located.
+- Own legacy plugin enablement in a versioned companion record using the official configuration preimage/restore flow; preserve reinstall idempotence and failure rollback. Support the config writer on Windows without weakening the existing POSIX source-recovery gate.
+
 ## v5.0.3 — 2026-10-19
 
 - Accept only the verified old/new Hermes channel-pin inheritance expressions while retaining strict binding, ordering and restore checks (#437, PR #438). Pin the compatibility matrix to main `0ab43d4f67e41be75f4f6c0fa14a86dbcfd3e5b3`.

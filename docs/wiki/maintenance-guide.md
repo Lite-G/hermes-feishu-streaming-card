@@ -351,6 +351,14 @@ Hermes 对已启用的插件可只更新 `allow_tool_override: false`，不排�
 
 ## 官方插件的本轮 footer 指标
 
+开发分支的 legacy `output_rate` 由 observe-only 插件供数，legacy 仍是唯一事件 producer。`install/legacy_observer.py` 管理 checkout 下 `.hermes_feishu_card_observer.json`（协议 `hfc-legacy-observer-v1`），绑定精确 HOME、runtime Python identity 和官方 config preimage/journal；它与原 v1/v2/v4 源码 manifest 分开版本化，不改写旧 manifest 语义。旧安装无此记录时重新 install 可迁移；重复 install 验证现有记录，不重复 enable 或覆盖 preimage。不要手工创建记录或修改 Hermes config。
+
+配置写入走 `install/plugin.py` 的官方 enable，源码写入仍由既有 patcher/事务拥有。新增 enable/marker 在源码事务之前完成；普通失败按逆序回滚配置和 PM registration。doctor/repair 拒绝配置或记录漂移，未知版本、非普通文件和不可检查 metadata 均不猜测。restore/uninstall 先核验并恢复配置原始字节，再恢复源码，成功后删除观察记录与 preimage；源码恢复失败时保留记录供重试，不重新启用插件。Windows 的 decomposed 源码恢复仍受原 POSIX dirfd 门禁限制；配置恢复成功不能称为 hooks 卸载成功。降级旧 HFC 前先用当前版本 restore，旧版本不知道此 companion ownership。
+
+`plugins.isolation: host` 不提供进程内指标，也不改变隔离设置。插件启动只读取记录；不补装、不修复、不发送 hello/heartbeat，不新增 sidecar runtime owner。具体计量、容量与失败显示规则见[观测耗时](observed-timing.md)。
+
+Doctor JSON 的 `install_state.legacy_observer` 只读报告 `active`、`disabled`（含 reason）或 `not_installed`；active 仅表示安装准入证据有效，不证明进程已加载插件。无法定位 marker 时保留 Hybrid 路径。共享配置事务的异常回滚与 Windows 私有原子写兼容同时适用于 legacy 和 v3。
+
 `post_api_request` 只接收已绑定 turn/session/platform 的归一化 usage、模型名及 request id；不保存原始 response 或 provider URL。每轮最多记录 256 个 request id，重放不重复累计，缺失任一次 usage 或超出上限时省略本轮 token 合计。上下文使用量只取最新独立请求的实际 prompt token；该请求 usage 缺失时清空旧值，不把上一请求当作最新值。容量通过既有 canonical turn carrier 的弱引用读取当前 `context_compressor.context_length`；同线程/task、当前 turn 不匹配或容量未知时不显示虚构的零值。耗时从本轮 pre-LLM 观察开始计算，不把工具等待时间称为模型推理时间。
 
 新增 publish 参数由官方安装器生成，旧安装只通过已知模板逐字重建验证后 restore，再重新安装；不得手改已安装 Hermes。指标只服务显示，不授予执行或交互所有权。交互卡明确 ACK 后，即使用户已先完成选择，也保留同一 pending identity 的卡片交付所有权，避免再次发送原生问题。
