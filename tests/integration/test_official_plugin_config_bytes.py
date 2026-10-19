@@ -4,11 +4,14 @@ These tests deliberately do not replace the planner or official enable process.
 The shared runtime is an ordinary wheel; inputs are the existing CI source roots.
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -26,10 +29,100 @@ ROOTS = {
 }
 
 
+def _run_with_failure_diagnostic(run, *args, **kwargs):
+    """Return the original result; never retry or disclose arbitrary output."""
+    result = run(*args, **kwargs)
+    if result.returncode:
+        stderr = result.stderr or b""
+        if isinstance(stderr, str):
+            stderr = stderr.encode("utf-8", errors="replace")
+        missing = re.findall(
+            rb"(?m)^ModuleNotFoundError: No module named '([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)'\r?$",
+            stderr,
+        )
+        print(
+            json.dumps(
+                {
+                    "official_enable_returncode": result.returncode,
+                    "missing_modules": sorted(
+                        {name.decode("ascii") for name in missing if len(name) <= 200}
+                    ),
+                    "stderr_bytes": len(stderr),
+                    "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    return result
+
+
+@pytest.fixture
+def official_enable_diagnostics(monkeypatch):
+    original = subprocess.run
+
+    def recorded(*args, **kwargs):
+        command = args[0] if args else kwargs.get("args", ())
+        if list(command[1:6]) == ["-I", "-m", "hermes_cli.main", "plugins", "enable"]:
+            return _run_with_failure_diagnostic(original, *args, **kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", recorded)
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_official_failure_diagnostic_redacts_real_child_output(capsys, missing):
+    secret = "SYNTHETIC-PRIVATE-CONFIG-SECRET"
+    stderr = (
+        secret
+        + "\n"
+        + (
+            "ModuleNotFoundError: No module named 'cryptography.hazmat'\n"
+            if missing
+            else "ModuleNotFoundError: No module named 'bad/" + secret + "'\n"
+        )
+    )
+    calls = []
+
+    def once(*args, **kwargs):
+        calls.append(args)
+        return subprocess.run(*args, **kwargs)
+
+    result = _run_with_failure_diagnostic(
+        once,
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys;sys.stdout.write('"
+            + secret
+            + "');sys.stderr.write("
+            + repr(stderr)
+            + ");sys.exit(7)",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert len(calls) == 1
+    assert result.stderr == stderr  # The caller still receives the original result.
+    output = capsys.readouterr().out
+    assert secret not in output
+    report = json.loads(output)
+    assert report == {
+        "official_enable_returncode": 7,
+        "missing_modules": ["cryptography.hazmat"] if missing else [],
+        "stderr_bytes": len(stderr.encode()),
+        "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
+    }
+
+
 @pytest.mark.parametrize("family", ROOTS)
 @pytest.mark.parametrize("selection", ["fresh", "already", "disabled-canonical"])
 def test_private_plan_equals_real_official_writer_and_exact_restore(
     official_runtime,
+    official_enable_diagnostics,
     tmp_path,
     family,
     selection,

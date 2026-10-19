@@ -122,7 +122,7 @@ jobs:
           ref: 7bda2a3368024f7ae1c70cef16583e7c2c891674
           path: .upstream/issue428_7bda2a
       - name: Install test dependencies
-        run: python -m pip install -e ".[test]" "uv==0.11.7" ruamel.yaml tomli-w packaging wheel rich python-dotenv requests prompt_toolkit
+        run: python -m pip install -e ".[test]" "uv==0.11.7" ruamel.yaml tomli-w packaging wheel rich python-dotenv requests prompt_toolkit "cryptography==48.0.0"
       - name: Prepare ordinary wheel
         shell: bash
         run: |
