@@ -273,7 +273,7 @@ def test_enable_plugin_allows_only_exact_plugin_config_change(tmp_path, monkeypa
     assert ownership.post_sha256 != ownership.pre_sha256
 
 
-def test_enable_plugin_rejects_unrelated_semantic_drift_and_restores_preimage(
+def test_enable_plugin_rejects_unrelated_semantic_drift_and_preserves_edit(
     tmp_path, monkeypatch
 ):
     original = "token: PRIVATE-CANARY\nplugins: {}\n"
@@ -291,7 +291,8 @@ def test_enable_plugin_rejects_unrelated_semantic_drift_and_restores_preimage(
     with pytest.raises(plugin.PluginConfigRefused, match="unrelated"):
         plugin.enable_plugin(binding, preimage)
 
-    assert binding.config_path.read_text(encoding="utf-8") == original
+    assert "CHANGED" in binding.config_path.read_text(encoding="utf-8")
+    assert preimage.backup_path.read_bytes() == original.encode()
 
 
 def test_restore_plugin_config_refuses_postimage_drift(tmp_path, monkeypatch):
@@ -391,7 +392,7 @@ def test_enable_plugin_accepts_exact_already_enabled_official_branch(
 
 
 @pytest.mark.parametrize("drift", ["model", "other-entry", "target-extra", "enabled-drop", "disabled-drop", "grant-true"])
-def test_enable_plugin_already_enabled_rejects_non_derived_delta_and_restores_exact(
+def test_enable_plugin_already_enabled_rejects_non_derived_delta_and_preserves_edit(
     tmp_path, monkeypatch, drift
 ):
     original = "# preserve comment and order\n" + yaml.safe_dump({
@@ -426,7 +427,8 @@ def test_enable_plugin_already_enabled_rejects_non_derived_delta_and_restores_ex
     monkeypatch.setattr(plugin, "_run_official_enable", drifting_enable)
     with pytest.raises(plugin.PluginConfigRefused, match="unrelated"):
         plugin.enable_plugin(binding, preimage)
-    assert binding.config_path.read_bytes() == original.encode()
+    assert binding.config_path.read_bytes() != original.encode()
+    assert preimage.backup_path.read_bytes() == original.encode()
 
 
 @pytest.mark.parametrize("enabled,disabled", [([], []), ([plugin.PLUGIN_KEY], [plugin.PLUGIN_KEY])])
@@ -444,7 +446,8 @@ def test_enable_plugin_not_enabled_rejects_entry_only_shortcut(tmp_path, monkeyp
     monkeypatch.setattr(plugin, "_run_official_enable", entry_only)
     with pytest.raises(plugin.PluginConfigRefused, match="unrelated"):
         plugin.enable_plugin(binding, preimage)
-    assert binding.config_path.read_bytes() == original.encode()
+    assert binding.config_path.read_bytes() != original.encode()
+    assert preimage.backup_path.read_bytes() == original.encode()
 
 
 @pytest.mark.parametrize("normalize_only", ["enabled", "disabled"])
@@ -469,4 +472,40 @@ def test_enable_plugin_already_enabled_rejects_mixed_list_normalization(
     monkeypatch.setattr(plugin, "_run_official_enable", partial_enable)
     with pytest.raises(plugin.PluginConfigRefused, match="unrelated"):
         plugin.enable_plugin(binding, preimage)
-    assert binding.config_path.read_bytes() == original.encode()
+    assert binding.config_path.read_bytes() != original.encode()
+    assert preimage.backup_path.read_bytes() == original.encode()
+
+@pytest.mark.parametrize("outcome", ["exception", "nonzero", "invalid-yaml"])
+def test_enable_failure_preserves_unowned_concurrent_config_and_preimage(tmp_path, monkeypatch, outcome):
+    binding = _binding(tmp_path, monkeypatch, "# original\nplugins: {}\n")
+    preimage = plugin.prepare_plugin_config(binding)
+    changed = b"user_change: preserve-me\nplugins: {}\n" if outcome != "invalid-yaml" else b"plugins: [broken\n"
+    def changed_enable(candidate):
+        candidate.config_path.write_bytes(changed)
+        if outcome == "exception":
+            raise OSError("synthetic CLI failure after concurrent edit")
+        return 1 if outcome == "nonzero" else 0
+    monkeypatch.setattr(plugin, "_run_official_enable", changed_enable)
+    with pytest.raises(plugin.PluginConfigRefused):
+        plugin.enable_plugin(binding, preimage)
+    assert binding.config_path.read_bytes() == changed
+    assert preimage.backup_path.read_bytes() == b"# original\nplugins: {}\n"
+    assert preimage.journal_path.is_file()
+
+
+@pytest.mark.parametrize("outcome", ["exception", "nonzero"])
+def test_enable_failure_rolls_back_only_verified_official_postimage(tmp_path, monkeypatch, outcome):
+    original = b"# preserve original bytes\r\nplugins: {}\r\n"
+    binding = _binding(tmp_path, monkeypatch, original.decode())
+    binding.config_path.write_bytes(original)
+    preimage = plugin.prepare_plugin_config(binding)
+    def failed_enable(candidate):
+        expected, _ = plugin._expected_enabled_config(yaml.safe_load(original))
+        candidate.config_path.write_text(yaml.safe_dump(expected))
+        if outcome == "exception":
+            raise OSError("synthetic failure after official config write")
+        return 1
+    monkeypatch.setattr(plugin, "_run_official_enable", failed_enable)
+    with pytest.raises(plugin.PluginConfigRefused, match="official plugin enable failed"):
+        plugin.enable_plugin(binding, preimage)
+    assert binding.config_path.read_bytes() == original

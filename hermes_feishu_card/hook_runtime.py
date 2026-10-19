@@ -9999,7 +9999,7 @@ def _build_event(
     sequence = (
         _peek_next_sequence(sequence_id) if preview else _next_sequence(sequence_id)
     )
-    event_data = _event_data(event_name, local_vars, source_obj, message_obj)
+    event_data = _event_data(event_name, local_vars, source_obj, message_obj, preview=preview)
     if thread_id:
         event_data.setdefault("thread_id", thread_id)
     payload = {
@@ -10405,7 +10405,8 @@ def _resolved_target_thread_id(targets: list[dict[str, Any]], platform: str) -> 
 
 
 def _event_data(
-    event_name: str, local_vars: dict[str, Any], source_obj: Any, message_obj: Any
+    event_name: str, local_vars: dict[str, Any], source_obj: Any, message_obj: Any,
+    *, preview: bool = False,
 ) -> dict[str, Any]:
     profile_id, profile_source = _profile_identity(local_vars, source_obj, message_obj)
     data: dict[str, Any] = {
@@ -10597,7 +10598,9 @@ def _event_data(
             "tokens": _completion_tokens(local_vars, answer),
             "context": _completion_context(local_vars),
         })
-        rate = _completion_observed_rate(local_vars)
+        # Preview checks body/media only; the actual terminal payload consumes
+        # observations once and is reused by exact staging and transport retries.
+        rate = None if preview else _completion_observed_rate(local_vars)
         if rate is not None:
             data["rate"] = rate
         delivery_kind = _first_string(local_vars, ("delivery_kind",))
@@ -11363,7 +11366,11 @@ def _completion_observed_rate(local_vars):
         if runtime is None:
             return None
         observed = runtime.take_observed_rate(result.get("session_id"))
-        if observed is None:
+        # A preflight/early return can reuse the session without ever calling
+        # pre_llm_call. Consume and discard unowned old observations unless the
+        # actual result proves this invocation made at least one API request.
+        api_calls = metric_count(result.get("api_calls"))
+        if observed is None or api_calls is None or api_calls == 0:
             return None
         rate, count = observed
         # Legacy footer counts can be session-cumulative on cached agents.

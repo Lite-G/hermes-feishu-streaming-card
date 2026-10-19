@@ -723,7 +723,7 @@ def _execute_diagnostic_fixture(binding, entrypoint, decision):
     )
 
 
-def test_plugin_enable_exit_zero_unrelated_change_reports_guard_and_restores(
+def test_plugin_enable_exit_zero_unrelated_change_reports_guard_and_preserves_edit(
     tmp_path, monkeypatch,
 ):
     import subprocess
@@ -754,7 +754,7 @@ def test_plugin_enable_exit_zero_unrelated_change_reports_guard_and_restores(
         with pytest.raises(v3.FixedTagInstallRefused) as caught:
             _execute_diagnostic_fixture(binding, entrypoint, decision)
         assert len(child_results) == 1 and child_results[0].returncode == 0
-        assert binding.config_path.read_bytes() == original_config
+        assert b"private: CHANGED" in binding.config_path.read_bytes()
         assert all((root / target).read_bytes() == raw for target, raw in originals.items())
         manifest = json.loads((root / ".hermes_feishu_card_manifest").read_text())
         assert manifest["phase"] == "prepared"
@@ -762,9 +762,11 @@ def test_plugin_enable_exit_zero_unrelated_change_reports_guard_and_restores(
         assert str(caught.value.__cause__) == "official plugin enable changed unrelated config"
         assert str(caught.value) == "official plugin enable changed unrelated config"
     finally:
-        v3.restore_fixed_tag_hybrid_install(binding=binding)
-    assert binding.config_path.read_bytes() == original_config
-    assert not (root / ".hermes_feishu_card_manifest").exists()
+        with pytest.raises(v3.FixedTagInstallRefused, match="config changed"):
+            v3.restore_fixed_tag_hybrid_install(binding=binding)
+    assert b"private: CHANGED" in binding.config_path.read_bytes()
+    assert (root / ".hermes_feishu_card_manifest").exists()
+    assert original_config in [p.read_bytes() for p in (binding.hermes_home / ".hermes_feishu_card" / "install").glob("*.yaml")]
 
 
 def test_plugin_preimage_drift_reports_guard_without_running_enable(tmp_path, monkeypatch):

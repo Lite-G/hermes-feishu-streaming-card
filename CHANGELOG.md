@@ -2,9 +2,11 @@
 
 ## Unreleased
 
+- Keep completion preview read-only so legacy and queued terminal payloads retain observed rates; reuse the frozen payload for exact Base staging and terminal transport retries. Reject changed observation bindings/call sites through the pinned v0.22.2 AST contract.
 - Supply opt-in `output_rate` on eligible legacy Hermes installs through an observe-only official plugin. Legacy remains the sole event producer; rates use exact per-invocation usage independently of cumulative legacy footer counts. Bound observations by TTL/capacity, reclaim consumed entries under pressure, and hide unknown, mixed-route or isolated-host samples.
-- Keep shared plugin-config rollback on official-enable exceptions and journal failure for both legacy and Hybrid v3; support private atomic writes without `os.fchmod` on Windows. Add read-only observer admission diagnostics and preserve Hybrid bootstrap when no observer marker can be located.
-- Own legacy plugin enablement in a versioned companion record using the official configuration preimage/restore flow; preserve reinstall idempotence and failure rollback. Support the config writer on Windows without weakening the existing POSIX source-recovery gate.
+- Roll back only verified official plugin-enable postimages for both legacy and Hybrid v3; preserve unknown or concurrently edited config bytes and recovery evidence. Support private atomic writes without `os.fchmod` on Windows. Preserve Hybrid bootstrap only when the observer marker is confirmed absent; disable admission on uninspectable metadata.
+- Own legacy plugin enablement in a versioned companion record using the official configuration preimage/restore flow; preserve reinstall idempotence and verified failure rollback. Support the config writer on Windows without weakening the existing POSIX source-recovery gate.
+- Thanks to @Lite-G for the report in #441 and the original implementation in #442.
 
 ## v5.0.3 — 2026-10-19
 

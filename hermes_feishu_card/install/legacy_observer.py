@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ast
 import json
+from hashlib import sha256
 from pathlib import Path
 import re
 import stat
@@ -21,19 +22,64 @@ MARKER = ".hermes_feishu_card_observer.json"
 PROTOCOL = "hfc-legacy-observer-v1"
 
 
+def _ast_contract(node: Any) -> Any:
+    """Stable AST shape across supported Python versions, without dump formatting.
+
+    Python 3.12 adds an empty FunctionDef.type_params field. Empty means the
+    same non-generic helper on 3.9; nonempty parameters remain contract drift.
+    """
+    if isinstance(node, ast.AST):
+        return [type(node).__name__, [
+            [name, _ast_contract(value)] for name, value in ast.iter_fields(node)
+            if not (name == "type_params" and value == [])
+        ]]
+    if isinstance(node, list):
+        return [_ast_contract(value) for value in node]
+    return node
+
+
+def _ast_sha256(node: ast.AST) -> str:
+    return sha256(json.dumps(_ast_contract(node), ensure_ascii=True,
+                             separators=(",", ":")).encode()).hexdigest()
+
+
 def available(root: Path) -> bool:
     raw = _read(root / "agent" / "turn_response_intake.py")
     if raw is None:
         return False
-    tree = ast.parse(raw)
+    # v0.22.2 exact observation producer: bind the usage/timing expressions and
+    # helper signature/imports, rather than accepting the same keyword names
+    # attached to unrelated values or an uncalled helper. Comments are irrelevant.
+    try:
+        tree = ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return False
+    helpers = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == "_fire_post_api_request_hook"]
+    owners = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+              and n.name == "normalize_model_response"]
+    if len(helpers) != 1 or len(owners) != 1:
+        return False
+    if _ast_sha256(helpers[0]) != (
+        "4620431faaa1e4fada26d16e8e80ee0cade75f75587cd4fa5f2f1a693025f05b"
+    ):
+        return False
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Name) and n.func.id == "_invoke_hook"
-             and n.args and isinstance(n.args[0], ast.Constant)
-             and n.args[0].value == "post_api_request"]
-    required = {"session_id", "turn_id", "platform", "api_request_id", "usage",
-                "model", "provider", "response_model", "started_at", "ended_at",
-                "first_chunk_at", "api_duration", "moa_references"}
-    return len(calls) == 1 and required <= {k.arg for k in calls[0].keywords}
+             and isinstance(n.func, ast.Name) and n.func.id == helpers[0].name]
+    if len(calls) != 1 or _ast_sha256(calls[0]) != (
+        "18fc5a627c600853c5d20545b8a4d541e3fde5a8f1bccceaa53c387f6b9ef6ef"
+    ):
+        return False
+    # Only the direct response-intake statement after provider projection is
+    # supported. A moved/nested/dead call cannot establish per-request timing.
+    body = owners[0].body
+    for index, statement in enumerate(body):
+        if isinstance(statement, ast.Expr) and statement.value is calls[0]:
+            previous = body[index - 1] if index else None
+            return (isinstance(previous, ast.Expr) and isinstance(previous.value, ast.Call)
+                    and _ast_contract(previous.value) == _ast_contract(
+                        ast.parse("splice_provider_projection(agent, response, messages)", mode="eval").body))
+    return False
 
 
 def _read(path: Path) -> bytes | None:
@@ -180,9 +226,10 @@ def observer_status(root: Path, *, home: Path | None = None) -> dict[str, str]:
     """Read-only installed admission state, not proof of a running plugin."""
     try:
         (root / MARKER).lstat()
-    except OSError:
-        # Do not disable unrelated Hybrid installations without marker evidence.
+    except FileNotFoundError:
         return {"status": "not_installed", "reason": "marker_not_located"}
+    except OSError:
+        return {"status": "disabled", "reason": "marker_uninspectable"}
     try:
         evidence = inspect(root, home=home)
         if evidence is None:
@@ -205,7 +252,7 @@ def observer_status(root: Path, *, home: Path | None = None) -> dict[str, str]:
 
 
 def process_observer_mode() -> str:
-    """Only a positively located observer marker can disable Hybrid admission."""
+    """Unknown observer admission disables ownership; proven absence allows Hybrid."""
     from ..instance_binding import gateway_process_binding
     binding = gateway_process_binding()
     if binding is None:

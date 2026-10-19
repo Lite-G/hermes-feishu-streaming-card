@@ -301,21 +301,20 @@ def enable_plugin(
     try:
         return_code = _run_official_enable(binding)
     except Exception as exc:
-        current = _read_bound_config(binding)
-        _restore_exact_config(binding, before_bytes, expected_sha256=_sha256(current))
+        _rollback_verified_enable(binding, before_bytes, expected, already_enabled_expected)
         raise PluginConfigRefused("official plugin enable failed") from exc
     after_bytes = _read_bound_config(binding)
     after_sha256 = _sha256(after_bytes)
     if return_code != 0:
-        _restore_exact_config(binding, before_bytes, expected_sha256=after_sha256)
+        _rollback_verified_enable(binding, before_bytes, expected, already_enabled_expected)
         raise PluginConfigRefused("official plugin enable failed")
     try:
         after = _load_config_mapping(after_bytes)
     except PluginConfigRefused:
-        _restore_exact_config(binding, before_bytes, expected_sha256=after_sha256)
+        # Invalid/partial bytes cannot be attributed to this enable transaction.
+        # Preserve them and the preimage for explicit recovery.
         raise
     if after != expected and after != already_enabled_expected:
-        _restore_exact_config(binding, before_bytes, expected_sha256=after_sha256)
         raise PluginConfigRefused("official plugin enable changed unrelated config")
     added_by_hfc = after_bytes != before_bytes
     ownership = PluginOwnership(
@@ -332,6 +331,29 @@ def enable_plugin(
         _restore_exact_config(binding, before_bytes, expected_sha256=after_sha256)
         raise
     return ownership
+
+
+def _rollback_verified_enable(
+    binding: HermesRuntimeBinding,
+    before_bytes: bytes,
+    expected: Mapping[str, object],
+    already_enabled_expected: Mapping[str, object],
+) -> None:
+    """Only restore a postimage derived from this command's exact contract.
+
+    A freshly read hash proves the read, not ownership of concurrent user edits.
+    Unknown/partial writes retain their bytes and preimage rather than guessing.
+    """
+    current = _read_bound_config(binding)
+    if current == before_bytes:
+        return
+    try:
+        config = _load_config_mapping(current)
+    except PluginConfigRefused as exc:
+        raise PluginConfigRefused("official plugin enable config is unknown; preserved for review") from exc
+    if config != expected and config != already_enabled_expected:
+        raise PluginConfigRefused("official plugin enable changed unrelated config")
+    _restore_exact_config(binding, before_bytes, expected_sha256=_sha256(current))
 
 
 def restore_plugin_config(

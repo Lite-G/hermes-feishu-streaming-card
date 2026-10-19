@@ -34,7 +34,7 @@ def runtime(monkeypatch):
 
 def complete(runtime, **changes):
     values = {"response": "A synthetic answer long enough for measured tokens. " * 8,
-              "agent_result": {"session_id": "synthetic-session", "output_tokens": 80}}
+              "agent_result": {"api_calls": 1, "session_id": "synthetic-session", "output_tokens": 80}}
     values.update(changes)
     return hook_runtime._event_data("message.completed", values, None, None)
 
@@ -76,9 +76,9 @@ def test_unknown_rate_is_hidden_without_blocking_completion(runtime, monkeypatch
     changes = {}
     if case in ("model", "provider"):
         rt.handle_post_api_request(**{**values, "api_request_id": "second", case: "different"})
-        changes["agent_result"] = {"session_id": "synthetic-session", "output_tokens": 160}
+        changes["agent_result"] = {"api_calls": 1, "session_id": "synthetic-session", "output_tokens": 160}
     elif case in ("estimate", "clipped", "mismatch", "session"):
-        changes["agent_result"] = {"session_id": "other" if case == "session" else "synthetic-session",
+        changes["agent_result"] = {"api_calls": 1, "session_id": "other" if case == "session" else "synthetic-session",
                                    "output_tokens": {"estimate": 0, "clipped": 99999, "mismatch": 81, "session": 80}[case]}
     elif case == "absent":
         monkeypatch.setattr(hook_runtime, "_plugin_runtime", lambda: None)
@@ -125,7 +125,7 @@ def test_footer_estimate_does_not_disqualify_exact_observations(runtime):
     rt, _ = runtime
     rt.handle_pre_llm_call(**observation())
     rt.handle_post_api_request(**observation())
-    data = complete(rt, response="x" * 320, agent_result={"session_id": "synthetic-session"})
+    data = complete(rt, response="x" * 320, agent_result={"api_calls": 1, "session_id": "synthetic-session"})
     assert data["tokens"]["output_tokens"] == 80
     assert data["rate"]["output_tps"] == 40.0
 
@@ -380,7 +380,7 @@ def test_cached_agent_consecutive_turns_use_own_observations(runtime, legacy_cou
                   "usage": {"input_tokens": 10, "output_tokens": 80 + index * 40}}
         rt.handle_pre_llm_call(**values)
         rt.handle_post_api_request(**values)
-        result = {"session_id": "synthetic-session", "output_tokens": legacy_count}
+        result = {"api_calls": 1, "session_id": "synthetic-session", "output_tokens": legacy_count}
         data = complete(rt, response="x" * 1000, agent_result=result)
         expected = hook_runtime._completion_tokens({"agent_result": result}, "x" * 1000)
         assert data["tokens"] == expected  # Footer semantics are unchanged.
@@ -486,4 +486,306 @@ def test_shared_plugin_transaction_portable_rollback(installed, monkeypatch, con
             result.rollback()
         else:
             plugin.restore_plugin_config(binding, preimage, result)
-    assert binding.config_path.read_bytes() == original
+    if failure == "official":
+        # Unknown official postimage can contain concurrent user edits. Retain
+        # those bytes and the original private preimage for diagnosis/retry.
+        assert binding.config_path.read_bytes() == b"plugins: {}\n"
+        state = binding.hermes_home / ".hermes_feishu_card" / "install"
+        assert list(state.glob("hfc-config-preimage-*.yaml"))
+        assert list(state.glob("hfc-config-preimage-*.json"))
+    else:
+        assert binding.config_path.read_bytes() == original
+
+
+def completion_locals(**changes):
+    return {"platform": "feishu", "chat_id": "synthetic-chat",
+            "conversation_id": "synthetic-conversation", "message_id": "synthetic-message",
+            "created_at": 1777017600.0, "response": "Full answer MEDIA:/tmp/synthetic.png",
+            "agent_result": {"api_calls": 1, "session_id": "synthetic-session", "output_tokens": 80}, **changes}
+
+
+@pytest.mark.parametrize("internal", [False, True])
+def test_completion_preview_preserves_rate_for_actual_event(runtime, internal):
+    rt, posted = runtime
+    rt.handle_pre_llm_call(**observation())
+    rt.handle_post_api_request(**observation())
+    values = completion_locals()
+    if internal:
+        values["source"] = SimpleNamespace(_hfc_internal_turn_id="synthetic-queued-turn")
+    first = hook_runtime.build_event("message.completed", values, preview=True)
+    second = hook_runtime.build_event("message.completed", values, preview=True)
+    actual = hook_runtime.build_event("message.completed", values)
+    assert actual["data"]["rate"] == {"output_tps": 40.0, "basis": "request"}
+    assert first["sequence"] == second["sequence"] == actual["sequence"]
+    for field in ("answer", "attachments", "native_delivery", "tokens"):
+        assert first["data"][field] == second["data"][field] == actual["data"][field]
+    assert actual["data"]["answer"] == "Full answer"
+    assert actual["data"]["attachments"]
+    assert actual["data"]["native_delivery"] == "required"
+    rt.handle_post_api_request(**observation())  # Late duplicate cannot revive it.
+    assert "rate" not in hook_runtime.build_event("message.completed", values)["data"]
+    assert posted == []
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError(5, "I/O"),
+                                   NotADirectoryError("parent")])
+def test_uninspectable_marker_metadata_cannot_enter_hybrid(tmp_path, monkeypatch, error):
+    from hermes_feishu_card import instance_binding
+    root, home = tmp_path / "root", tmp_path / "home"
+    root.mkdir()
+    home.mkdir()
+    original_lstat = Path.lstat
+    def denied(path, *args, **kwargs):
+        if path == root / install.MARKER:
+            raise error
+        return original_lstat(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", denied)
+    monkeypatch.setattr(instance_binding, "gateway_process_binding", lambda: (root, home))
+    assert install.observer_status(root)["status"] == "disabled"
+    assert install.process_observer_mode() == "disabled"
+    monkeypatch.setattr(runtime_module, "acquire_runtime_control", lambda **k: pytest.fail("runtime owner"))
+    monkeypatch.setattr(runtime_module, "read_transport_root_secret", lambda: pytest.fail("transport"))
+    runtime_module.reset_production_plugin_runtime_for_tests()
+    try:
+        runtime_module.bootstrap_plugin_runtime(SimpleNamespace(register_hook=lambda *a: None))
+        assert runtime_module.active_plugin_runtime() is None
+    finally:
+        runtime_module.reset_production_plugin_runtime_for_tests()
+
+
+# Source-derived from the pinned Hermes v0.22.2 observation helper/call.
+_OBSERVER_SOURCE_CONTRACT = """def _fire_post_api_request_hook(
+    agent: Any, response: Any, assistant_message: Any, finish_reason: Any, *, api_messages: Any,
+    api_call_count: Any, api_duration: Any, api_start_time: Any, api_request_id: Any,
+    effective_task_id: Any, turn_id: Any,
+) -> None:
+    from agent.conversation_loop import _moa_reference_metrics_for_hook
+
+    try:
+        from hermes_cli.lifecycle import has_hook, invoke_hook as _invoke_hook
+        if has_hook("post_api_request"):
+            _invoke_hook(
+                "post_api_request",
+                task_id=effective_task_id,
+                turn_id=turn_id,
+                api_request_id=api_request_id,
+                session_id=agent.session_id or "",
+                platform=agent.platform or "",
+                model=agent.model,
+                provider=agent.provider,
+                base_url=agent.base_url,
+                api_mode=agent.api_mode,
+                api_call_count=api_call_count,
+                api_duration=api_duration,
+                started_at=api_start_time,
+                ended_at=api_start_time + api_duration,
+                # First stream chunk time (epoch s); None if not streamed / no chunk.
+                # TTFB = first_chunk_at - started_at.
+                first_chunk_at=getattr(agent, "_last_api_first_chunk_at", None),
+                finish_reason=finish_reason,
+                message_count=len(api_messages),
+                response_model=getattr(response, "model", None),
+                response=agent._api_response_payload_for_hook(
+                    response, assistant_message, finish_reason=finish_reason
+                ),
+                usage=agent._usage_summary_for_api_request_hook(response),
+                context_length=getattr(getattr(agent, "context_compressor", None), "context_length", None),
+                assistant_message=assistant_message,
+                assistant_content_chars=len(assistant_message.content or ""),
+                assistant_tool_call_count=len(getattr(assistant_message, "tool_calls", None) or []),
+                moa_references=_moa_reference_metrics_for_hook(agent),
+            )
+    except Exception:
+        pass
+
+def normalize_model_response():
+    splice_provider_projection(agent, response, messages)
+    _fire_post_api_request_hook(
+            agent, response, assistant_message, finish_reason, api_messages=api_messages,
+            api_call_count=api_call_count, api_duration=api_duration, api_start_time=api_start_time,
+            api_request_id=api_request_id, effective_task_id=effective_task_id, turn_id=turn_id,
+        )
+"""
+
+
+@pytest.mark.parametrize("change", [None, "usage", "duration", "request", "session",
+                                   "caller", "nested", "position", "syntax"])
+def test_observer_admission_binds_values_and_response_intake(tmp_path, change):
+    source = _OBSERVER_SOURCE_CONTRACT
+    if change == "usage":
+        source = source.replace("agent._usage_summary_for_api_request_hook(response)", "agent.session_usage")
+    elif change == "duration":
+        source = source.replace("ended_at=api_start_time + api_duration", "ended_at=api_start_time")
+    elif change == "request":
+        source = source.replace("api_request_id=api_request_id", "api_request_id=turn_id")
+    elif change == "session":
+        source = source.replace("session_id=agent.session_id", "session_id=agent.other_session_id")
+    elif change == "caller":
+        source = source.replace("api_duration=api_duration, api_start_time=api_start_time", "api_duration=0, api_start_time=api_start_time")
+    elif change == "nested":
+        source = source.replace("    _fire_post_api_request_hook(\n", "    if False:\n        _fire_post_api_request_hook(\n")
+    elif change == "position":
+        source = source.replace("    splice_provider_projection(agent, response, messages)\n", "")
+    elif change == "syntax":
+        source = "invalid source: ("
+    path = tmp_path / "agent" / "turn_response_intake.py"
+    path.parent.mkdir()
+    path.write_text(source)
+    assert install.available(tmp_path) is (change is None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["emit", "queued", "stage"])
+async def test_actual_completion_entrypoints_freeze_rate_and_retry_payload(runtime, monkeypatch, mode):
+    import asyncio
+    rt, _ = runtime
+    rt.handle_pre_llm_call(**observation())
+    rt.handle_post_api_request(**observation())
+    values = completion_locals()
+    if mode == "queued":
+        values["source"] = SimpleNamespace(_hfc_internal_turn_id="synthetic-queued-final")
+    config = hook_runtime.RuntimeConfig(
+        enabled=True, event_url="http://127.0.0.1:12345/events", timeout_seconds=0.2,
+        delta_coalesce_ms=0, delta_coalesce_chars=0, delta_coalesce_max_pending=10)
+    monkeypatch.setattr(hook_runtime, "load_runtime_config", lambda: config)
+    monkeypatch.setattr(hook_runtime, "_ensure_runtime_control_started", lambda *_: None)
+    async def allow(*args, **kwargs):
+        return hook_runtime._PolicyGateResult(True, None)
+    async def flush(*args):
+        pass
+    monkeypatch.setattr(hook_runtime, "_policy_gate_async", allow)
+    monkeypatch.setattr(hook_runtime, "_flush_pending_deltas_for_local_vars", flush)
+    monkeypatch.setattr(hook_runtime, "TERMINAL_DELIVERY_RETRY_DELAYS", (0,))
+    posted = []
+    async def post(url, payload, timeout):
+        posted.append(payload)
+        if len(posted) == 1 and mode != "stage":
+            # A late observation during a transport retry must not change payload.
+            rt.handle_post_api_request(**observation())
+            raise TimeoutError("synthetic lost response")
+        return {"ok": True, "applied": True}
+    monkeypatch.setattr(hook_runtime, "_post_json_ordered_response", post)
+    preview = hook_runtime.build_event("message.completed", values, preview=True)
+    if mode == "stage":
+        assert await hook_runtime.stage_message_completed_from_hermes_locals_async(values)
+        assert posted == []
+        stage = hook_runtime._exact_completion_stage_for_current_task()
+        assert stage["task_id"] == id(asyncio.current_task())
+        payload = stage["payload"]
+        assert payload["data"]["rate"] == {"output_tps": 40.0, "basis": "request"}
+        returned = await hook_runtime.prepare_exact_base_final_delivery({
+            "delivery_adapter": SimpleNamespace(name="feishu"),
+            "content": "Full answer", "reply_to": "synthetic-parent",
+            "metadata": {}, "images": [], "media_files": [],
+            "local_files": ["/tmp/synthetic.png"],
+        })
+        assert returned[1] == "Full answer"
+        assert hook_runtime._HFC_EXACT_COMPLETION_STAGE.get() is None
+    else:
+        assert await hook_runtime.emit_from_hermes_locals_async(values, "message.completed")
+    assert len(posted) == (1 if mode == "stage" else 2)
+    if mode != "stage":
+        assert posted[0] is posted[1]
+    assert posted[0]["data"]["rate"] == {"output_tps": 40.0, "basis": "request"}
+    assert posted[0]["sequence"] == preview["sequence"]
+    for field in ("answer", "tokens"):
+        assert posted[0]["data"][field] == preview["data"][field]
+    assert posted[0]["data"]["attachments"]
+    assert posted[0]["data"]["native_delivery"] == "required"
+    assert rt.take_observed_rate("synthetic-session") is None
+
+
+@pytest.mark.parametrize("shape", ["python39", "python312", "generic"])
+def test_observer_ast_contract_is_stable_across_python_fields(tmp_path, monkeypatch, shape):
+    import ast
+    path = tmp_path / "agent" / "turn_response_intake.py"
+    path.parent.mkdir()
+    path.write_text(_OBSERVER_SOURCE_CONTRACT)
+    parse = ast.parse
+    def version_shape(*args, **kwargs):
+        tree = parse(*args, **kwargs)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                if shape == "python39":
+                    if hasattr(node, "type_params"):
+                        del node.type_params
+                else:
+                    # Model 3.12+'s additional field even on older test Python.
+                    if "type_params" not in node._fields:
+                        node._fields = (*node._fields, "type_params")
+                    node.type_params = [] if shape == "python312" else [ast.Name(id="T")]
+        return tree
+    monkeypatch.setattr(ast, "parse", version_shape)
+    monkeypatch.setattr(ast, "dump", lambda *a, **k: pytest.fail("version-dependent ast.dump"))
+    assert install.available(tmp_path) is (shape != "generic")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous_terminal", ["native", "failed"])
+async def test_no_api_completion_cannot_borrow_previous_turn_rate(runtime, monkeypatch, previous_terminal):
+    """Stable's preflight timeout returns before pre_llm_call, then Gateway adds session_id."""
+    import ast
+    rt, _ = runtime
+    rt.handle_pre_llm_call(**observation())
+    rt.handle_post_api_request(**observation())
+    config = hook_runtime.RuntimeConfig(True, "http://127.0.0.1:12345/events", .2, 0, 0, 10)
+    monkeypatch.setattr(hook_runtime, "load_runtime_config", lambda: config)
+    monkeypatch.setattr(hook_runtime, "_ensure_runtime_control_started", lambda *_: None)
+    allowed = [previous_terminal == "failed"]
+    async def gate(*a, **kw):
+        return hook_runtime._PolicyGateResult(allowed[0], None)
+    async def flush(*a):
+        pass
+    posted = []
+    async def post(url, payload, timeout):
+        posted.append(payload)
+        return {"ok": True, "applied": True}
+    monkeypatch.setattr(hook_runtime, "_policy_gate_async", gate)
+    monkeypatch.setattr(hook_runtime, "_flush_pending_deltas_for_local_vars", flush)
+    monkeypatch.setattr(hook_runtime, "_post_json_ordered_response", post)
+    await hook_runtime.emit_from_hermes_locals_async(
+        completion_locals(), "message.failed" if previous_terminal == "failed" else "message.completed")
+    # Source-derived return expressions from Hermes v0.22.2. The full raw-return
+    # AST -> real run_sync common AST -> HFC entrypoint reproduction is retained
+    # with the review evidence; these expressions keep the regression hermetic.
+    source = '''
+def _partial_turn_result(final_response, messages, api_call_count, **flags):
+    return {"final_response": final_response, "messages": messages, "completed": False,
+            "api_calls": api_call_count, "error": final_response, "partial": True, **flags}
+result = _partial_turn_result(
+    str(exc), list(conversation_history or []), 0,
+    failed=True, compression_exhausted=True, turn_exit_reason="context_compression_timeout",
+    failure_reason="context_overflow", failure_retryable=False)
+'''
+    namespace = {"exc": TimeoutError("Synthetic preflight timeout"), "conversation_history": []}
+    exec(compile(ast.parse(source), "<stable-preflight-return>", "exec"), namespace)
+    result = {**namespace["result"], "session_id": "synthetic-session"}
+    allowed[0] = True
+    assert await hook_runtime.emit_from_hermes_locals_async(completion_locals(
+        message_id="synthetic-new-turn", response=result["final_response"], agent_result=result),
+        "message.completed")
+    assert "rate" not in posted[-1]["data"]
+    assert posted[-1]["data"]["answer"] == result["final_response"]
+    assert result["api_calls"] == 0 and result["failed"] is True
+    # Purge the stale sample so its late callbacks cannot survive the no-API
+    # terminal or starve the next legitimate observed turn as an overlap.
+    rt.handle_post_api_request(**observation())
+    next_values = {**observation(), "turn_id": "synthetic-next-turn", "api_request_id": "next-request"}
+    rt.handle_pre_llm_call(**next_values)
+    rt.handle_post_api_request(**next_values)
+    actual = hook_runtime.build_event("message.completed", completion_locals(
+        message_id="synthetic-next-message", agent_result={"api_calls": 1, "session_id": "synthetic-session"}))
+    assert actual["data"]["rate"] == {"output_tps": 40.0, "basis": "request"}
+    assert "rate" not in hook_runtime.build_event("message.completed", completion_locals())["data"]
+
+
+@pytest.mark.parametrize("api_calls", [None, False, -1, "1", "absent"])
+def test_unknown_invocation_api_count_discards_unowned_rate(runtime, api_calls):
+    rt, _ = runtime
+    rt.handle_pre_llm_call(**observation())
+    rt.handle_post_api_request(**observation())
+    result = {"session_id": "synthetic-session"}
+    if api_calls != "absent":
+        result["api_calls"] = api_calls
+    assert "rate" not in complete(rt, agent_result=result)
+    assert rt.take_observed_rate("synthetic-session") is None
