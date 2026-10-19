@@ -165,7 +165,7 @@
       "tests/unit/test_clarify_timeout_status.py",
       "tests/unit/test_clarify_timeout_admission.py",
       "tests/integration/test_legacy_observer_install.py",
-      "tests/integration/test_plugin_config_bytes.py",
+      "tests/integration/test_official_plugin_config_bytes.py",
       "tests/unit/test_plugin_config_bytes.py"
     ],
     "storage": [

@@ -149,7 +149,7 @@ jobs:
           HFC_REQUIRE_LEGACY_PLUGIN_INSTALL: "1"
           HFC_REQUIRE_CONFIG_WRITER_CONTRACT: "1"
         run: >-
-          python -m pytest tests/integration/test_plugin_config_bytes.py
+          python -m pytest tests/integration/test_official_plugin_config_bytes.py
           --basetemp=${{ runner.temp }}/hfc-config-writer-pytest -q -s
       - name: Verify pinned official plugin enable, discovery and exact legacy recovery
         env:
