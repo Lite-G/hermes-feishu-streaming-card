@@ -9,7 +9,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
+import time
 
 import pytest
 
@@ -111,15 +113,56 @@ def official_runtime(tmp_path_factory):
         path_file.unlink(missing_ok=True)
 
 
-def _run(python, root, home, code, *args, expected=0):
-    child = subprocess.run([str(python), "-I", "-c", code, str(root), *map(str, args)],
-        cwd=home, env={"HOME": str(home), "HERMES_HOME": str(home),
-                      "PYTHONDONTWRITEBYTECODE": "1"},
-        capture_output=True, text=True, timeout=180)
-    assert child.returncode == expected, child.stdout + child.stderr
+def _stop_stage_group(child):
+    """Only this stage's new POSIX session is eligible for termination."""
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    # The direct child may exit on TERM while an official CLI grandchild ignores
+    # it. Always address the original group again, even after wait() succeeded.
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    child.wait(timeout=5)
+
+
+def _run(python, root, home, code, *args, expected=0, stage, timeout=180):
+    assert os.name == "posix", "official CLI harness requires POSIX process-group isolation"
+    log = home / (stage + ".log")
+    started = time.monotonic()
+    print(f"HFC stage={stage} BEGIN budget={timeout}s log={log}", flush=True)
+    command = [str(python), "-I", "-u", "-c",
+               f"print('HFC child stage={stage} START', flush=True)\n" + code,
+               str(root), *map(str, args)]
+    timed_out = False
+    with log.open("w", encoding="utf-8") as output:
+        child = subprocess.Popen(command, cwd=home,
+            env={"HOME": str(home), "HERMES_HOME": str(home),
+                 "PYTHONDONTWRITEBYTECODE": "1"},
+            stdout=output, stderr=subprocess.STDOUT, text=True,
+            start_new_session=True)
+        try:
+            child.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        finally:
+            # Also clean descendants if the stage exited early or was interrupted.
+            _stop_stage_group(child)
+    text = log.read_text(encoding="utf-8")
+    elapsed = time.monotonic() - started
+    print(text, end="", flush=True)
+    print(f"HFC stage={stage} END elapsed={elapsed:.2f}s rc={child.returncode} timeout={timed_out}", flush=True)
+    assert not timed_out, f"HFC stage={stage} timed out after {timeout}s; process group terminated; log={log}\n{text}"
+    assert child.returncode == expected, text
     assert not (home / "hfc-forbidden.jsonl").exists(), (
         (home / "hfc-forbidden.jsonl").read_text() if (home / "hfc-forbidden.jsonl").exists() else "")
-    return child
+    return subprocess.CompletedProcess(command, child.returncode, stdout=text, stderr="")
 
 
 @pytest.mark.parametrize("command,migrate", [("restore", False), ("uninstall", True)])
@@ -153,47 +196,55 @@ import sys
 from pathlib import Path
 from hermes_feishu_card.install.detect import detect_hermes
 from hermes_feishu_card.install.recovery import install_decomposed
+print("legacy source transaction BEGIN", flush=True)
 assert install_decomposed(detect_hermes(Path(sys.argv[1])))
-''')
-    output = _run(python, root, home, r'''
-import sys,json
+print("legacy source transaction END", flush=True)
+''', stage="legacy-preinstall", timeout=300)
+    install_code = r'''
+import sys
 from pathlib import Path
 from hermes_feishu_card import cli
-from hermes_feishu_card.install import plugin,legacy_observer
-from hermes_feishu_card.install.detect import detect_hermes
 root=Path(sys.argv[1]);home=Path.home()
-# Retain real child CLI diagnostics without replacing the official adapter.
+# Retain real official CLI diagnostics. These wrappers only observe real calls.
 import subprocess
 original_run=subprocess.run
 def logged_run(*args,**kwargs):
+    official = "hermes_cli.main" in args[0]
+    if official:
+        print("official enable BEGIN", flush=True)
     result=original_run(*args,**kwargs)
-    if "hermes_cli.main" in args[0]:
-        print("official CLI:",result.returncode,result.stdout,result.stderr)
-        print("official config:",(home/"config.yaml").read_text())
+    if official:
+        print("official enable END:",result.returncode,result.stdout,result.stderr,flush=True)
     return result
 subprocess.run=logged_run
-# The environment already supplies the exact ordinary HFC wheel. SDK
-# provisioning is irrelevant: this test never imports a Feishu adapter.
+# Exact wheel is already installed; no Feishu adapter is imported by this test.
 cli._ensure_hermes_runtime_package=lambda *a,**k:None
 cli._ensure_hermes_feishu_sdk=lambda *a,**k:None
+print("HFC install dispatch BEGIN", flush=True)
 assert cli.main(["install","--hermes-dir",str(root),"--hermes-home",str(home),"--yes"]) == 0
-assert cli.main(["install","--hermes-dir",str(root),"--hermes-home",str(home),"--yes"]) == 0
-# Run the public doctor command; missing SDK/runtime health is deliberately
-# separate from installed source/observer admission and can yield exit 1.
-import contextlib,io
+print("HFC install dispatch END", flush=True)
+'''
+    _run(python, root, home, install_code, stage="install", timeout=300)
+    _run(python, root, home, install_code, stage="repeat-install")
+    _run(python, root, home, r'''
+import sys,json,contextlib,io
+from pathlib import Path
+from hermes_feishu_card import cli
+from hermes_feishu_card.install import legacy_observer
+root=Path(sys.argv[1]);home=Path.home()
 config=home/"hfc.yaml"
 config.write_text("server:\n  host: 127.0.0.1\n  port: 9\n")
 report=io.StringIO()
+print("doctor dispatch BEGIN", flush=True)
 with contextlib.redirect_stdout(report):
     result=cli.main(["doctor","--config",str(config),"--hermes-dir",str(root),"--hermes-home",str(home),"--json"])
+print("doctor dispatch END", flush=True)
 assert result in (0,1)
 report=json.loads(report.getvalue())
 assert report["install_state"]["status"] == "installed"
 assert report["install_state"]["legacy_observer"]["status"] == "active"
 assert legacy_observer.observer_status(root,home=home)["status"] == "active"
-print("official-enable-installed")
-''')
-    assert "official-enable-installed" in output.stdout
+''', stage="doctor")
     installed = {name: (root / name).read_bytes() for name in before}
     assert installed != before
     # Public discovery and hook delivery: no private _scan/_load entrypoint,
@@ -215,13 +266,58 @@ assert rt.take_observed_rate("synthetic-session")[1] == 80
 assert rt.runtime_activity_snapshot() == (0,True)
 assert rt.runtime_interaction_listener_snapshot()["accepting"] is False
 runtime.reset_production_plugin_runtime_for_tests()
-''')
+''', stage="public-discovery")
     _run(python, root, home, r'''
 import sys
 from hermes_feishu_card import cli
 assert cli.main([sys.argv[2],"--hermes-dir",sys.argv[1],"--hermes-home",str(__import__("pathlib").Path.home()),"--yes"]) == 0
-''', command)
+''', command, stage=command)
     assert (home / "config.yaml").read_bytes() == original
     assert {name: (root / name).read_bytes() for name in before} == before
     assert not (root / ".hermes_feishu_card_observer.json").exists()
     assert not (root / ".hermes_feishu_card_manifest").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group harness")
+def test_stage_timeout_kills_grandchild_but_preserves_unrelated_process(tmp_path):
+    """Exercise the actual deadline/kill path, including a TERM-resistant child."""
+    import sys
+    home = tmp_path / "home"
+    home.mkdir()
+    sibling = subprocess.Popen([sys.executable, "-I", "-c", "import time;time.sleep(60)"],
+                               env={"HOME": str(home), "HERMES_HOME": str(home)},
+                               start_new_session=True)
+    code = r'''
+import subprocess,sys,time
+from pathlib import Path
+home=Path.home()
+grandchild=r"""
+import os,signal,time
+from pathlib import Path
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+home=Path.home()
+(home/"grandchild.pid").write_text(str(os.getpid()))
+while True:
+    with (home/"heartbeat").open("a") as out: out.write("tick\n")
+    time.sleep(.02)
+"""
+subprocess.Popen([sys.executable,"-I","-u","-c",grandchild])
+while not (home/"grandchild.pid").exists(): time.sleep(.01)
+print("grandchild ready",flush=True)
+while True: time.sleep(.05)
+'''
+    try:
+        with pytest.raises(AssertionError, match="stage=forced-timeout timed out"):
+            _run(sys.executable, tmp_path, home, code, stage="forced-timeout", timeout=2)
+        assert "grandchild ready" in (home / "forced-timeout.log").read_text()
+        pid = int((home / "grandchild.pid").read_text())
+        # A reparented zombie can await OS reaping; it is no longer executable.
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)],
+                               text=True, capture_output=True, timeout=5).stdout.strip()
+        assert not state or state.startswith("Z"), state
+        before = (home / "heartbeat").read_bytes()
+        time.sleep(.1)
+        assert (home / "heartbeat").read_bytes() == before
+        assert sibling.poll() is None, "another process group must survive"
+    finally:
+        _stop_stage_group(sibling)
