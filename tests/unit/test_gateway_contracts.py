@@ -59,9 +59,13 @@ def test_shared_ast_guard_in_two_blocks_rejects_control_flow_ambiguity():
 
 
 @pytest.mark.parametrize('mutation', ['missing', 'rebound', 'late', 'partial', 'wrong-prompt'])
-def test_pinned_source_requires_original_complete_preceding_tuple(mutation):
+@pytest.mark.parametrize('internal', [
+    'event.internal',
+    'event.internal or getattr(event, "inherit_channel_pin", False)',
+])
+def test_pinned_source_requires_original_complete_preceding_tuple(mutation, internal):
     run = RUN.replace('source=source', 'source=_turn_source').replace('event))','event), channel_prompt=_turn_channel_prompt)')
-    pin = PIN
+    pin = PIN.replace('event.internal)', internal+')')
     if mutation == 'missing': pin = ''
     if mutation == 'rebound': pin += '\n_turn_source = other'
     if mutation == 'partial': pin = pin.replace('_turn_channel_prompt, _turn_source', '_turn_source')
@@ -85,6 +89,10 @@ def test_complete_pinned_tuple_accepts_only_exact_bindings(internal):
     'True', 'event.internal or other',
     'event.internal or getattr(event, "inherit_channel_pin", True)',
     'getattr(event, "inherit_channel_pin", False)',
+    'event.internal and getattr(event, "inherit_channel_pin", False)',
+    'event.internal or getattr(other, "inherit_channel_pin", False)',
+    'event.internal or getattr(event, "other_flag", False)',
+    'event.internal or getattr(event, "inherit_channel_pin", False) or other',
 ])
 def test_unknown_pin_inheritance_is_rejected(internal):
     run = RUN.replace('source=source', 'source=_turn_source')
