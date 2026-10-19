@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .observations import TurnObservation
+from .turn_metrics import RATE_MIN_OUTPUT_TOKENS, completion_output_rate, metric_count
 
 from dataclasses import dataclass, field, replace
 from copy import deepcopy
@@ -67,19 +68,6 @@ def _exact_feishu_open_id(value: object) -> str:
         else ""
     )
 
-
-def _completion_output_rate(value: Any) -> Optional[tuple]:
-    """Validate an optional per-invocation output rate from turn metrics."""
-    if not isinstance(value, dict):
-        return None
-    rate = value.get("output_tps")
-    basis = value.get("basis")
-    if type(rate) not in (int, float) or basis not in ("decode", "request"):
-        return None
-    rate = float(rate)
-    if not math.isfinite(rate) or not 0 < rate < 1_000_000:
-        return None
-    return rate, basis
 
 @dataclass
 class ToolState:
@@ -577,8 +565,9 @@ class CardSession:
             self.tokens = dict(tokens) if isinstance(tokens, dict) else {}
             self.tokens.pop("output_tps", None)
             self.tokens.pop("rate_basis", None)
-            rate = _completion_output_rate(event.data.get("rate"))
-            if rate is not None and self.tokens.get("output_tokens"):
+            rate = completion_output_rate(event.data.get("rate"))
+            count = metric_count(self.tokens.get("output_tokens"))
+            if rate is not None and count is not None and count >= RATE_MIN_OUTPUT_TOKENS:
                 # Kept inside the persisted tokens mapping so checkpoints keep their schema.
                 self.tokens["output_tps"], self.tokens["rate_basis"] = rate
             model = event.data.get("model")

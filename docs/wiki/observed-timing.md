@@ -14,4 +14,11 @@
 
 这不是模型 TTFT，也不代表客户端首字可见时间。它包含 HFC 受理事件之间的时间，无法替代模型、Gateway 和飞书 API 各自的耗时。Feishu 更新耗时和 terminal drain 指标仍沿用原来的独立口径。
 
-[#392](https://github.com/baileyh8/hermes-feishu-streaming-card/issues/392) 第一阶段提供可选页脚字段 `output_rate`，只用 Hermes `post_api_request` 对同一 `api_request_id` 报告的 `usage.output_tokens` 与该次调用的时间范围：有 `first_chunk_at` 时取 `ended_at - first_chunk_at`（`decode`），否则取 `api_duration`（`request`，包含 TTFT，页脚标注 `~` 与“含TTFT”）。各调用 token 相加、时间相加后相除，调用间的工具与等待不计入。任一调用缺少 usage/有效时间（非有限值、不大于 0 或不小于 3600 秒）、请求标识无效、MoA 聚合调用、输出少于 20 tokens 或总生成时间不足 0.3 秒时整轮不显示。速率保存在已持久化的 `tokens` 映射（`output_tps`、`rate_basis`）中，不新增检查点字段。上面的侧车事件计时依旧不是模型速率；运行中的实时估算（第二阶段）仍未实现，不会把字符估算冒充模型生成速度。
+[#392](https://github.com/baileyh8/hermes-feishu-streaming-card/issues/392) 第一阶段提供可选页脚字段 `output_rate`，默认关闭。只使用 Hermes `post_api_request` 对同一 `api_request_id` 报告的 `usage.output_tokens` 和时间范围。数据来自逐调用观测，不使用正文字符数或整轮耗时估算。
+
+- 有 `first_chunk_at` 时，取 `ended_at - first_chunk_at`，页脚显示 `~N tok/s (流式)`。协议值 `decode` 为兼容性保留；这段时间是流式窗口，首个事件可能只是 role、reasoning 或 Responses lifecycle 帧，不能解释为纯答案解码速度，也不能推出首个可见 token 时间。usage 是否包含 reasoning tokens 由 provider 的输出 token 统计口径决定。
+- 没有首 chunk 时间时，取 `api_duration`，显示 `~N tok/s (含TTFT)`。Hermes 请求耗时可能包含失败重试及其等待，因此这也是观测窗口的平均速率。
+- 多次调用将输出 token 相加、对应时间相加后相除；调用间的工具与等待不计入。重复请求标识只记一次，模型或 provider 切换时隐藏整轮速率，避免将混合路线的速率归到最后一个模型。
+- 任一调用缺少 usage/有效时间（非有限值、时序矛盾、不大于 0 或不小于 3600 秒）、请求标识无效、MoA 聚合调用、输出少于 20 tokens 或总窗口不足 0.3 秒时整轮不显示。非法或超出显示上限的速率也隐藏，不影响正文。
+
+速率保存在既有持久化 `tokens` 映射（`output_tps`、`rate_basis`）中，不新增检查点字段；旧检查点仍不显示速率，恢复数据在渲染和健康统计前再次校验。上面的侧车事件计时依旧不是模型速率；运行中的实时估算（第二阶段）未实现。固定 Hermes stable/main 的原始 hook 调用、每次请求的首 chunk 重置，以及首事件计时语义由 CI 源码契约检查覆盖；这些测试不代表真实模型或飞书客户端验收。

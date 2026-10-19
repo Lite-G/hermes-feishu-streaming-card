@@ -148,6 +148,7 @@ from .render import (
 )
 from .process import state_dir
 from .session import CardSession
+from .turn_metrics import retained_output_rate
 from .approval_receipts import approval_receipt_fingerprint
 from .display_segments import begin_continuation, display_view, needs_continuation
 from .legacy_owner import (auxiliary_receipt_card,
@@ -942,7 +943,7 @@ async def _health(request: web.Request) -> web.Response:
             (session.observation for session in sessions.values()),
             rate_samples=sum(
                 1 for session in sessions.values()
-                if isinstance(session.tokens, dict) and "output_tps" in session.tokens
+                if retained_output_rate(session.tokens) is not None
             ),
         ),
         "reply_index": {

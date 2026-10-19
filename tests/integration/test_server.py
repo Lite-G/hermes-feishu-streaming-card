@@ -14688,3 +14688,22 @@ def test_operations_handoff_unavailable_is_safe_manual_review_warning():
     assert "oc_private_identifier" not in content
     assert "secret-path" not in content
     assert inspect_card_limits(card).safe
+
+
+@pytest.mark.parametrize("tokens,available", [
+    ({"output_tokens": 100, "output_tps": 42, "rate_basis": "decode"}, True),
+    ({"output_tokens": 100, "output_tps": 0.2, "rate_basis": "request"}, True),
+    ({"output_tokens": 100, "output_tps": 10 ** 400, "rate_basis": "decode"}, False),
+    ({"output_tokens": 100, "output_tps": 42, "rate_basis": "estimate"}, False),
+    ({"output_tps": 42, "rate_basis": "decode"}, False),
+])
+async def test_health_counts_only_valid_retained_invocation_rates(tokens, available):
+    app = create_app(FakeFeishuClient())
+    session = CardSession("synthetic-conversation", "synthetic-turn", "synthetic-chat")
+    session.status = "completed"
+    session.tokens = tokens
+    app[SESSIONS_KEY]["synthetic-turn"] = session
+    response = await sidecar_server._health(make_mocked_request("GET", "/health", app=app))
+    timing = json.loads(response.body)["timing"]
+    assert timing["token_rate_status"] == ("available" if available else "unavailable")
+    assert timing.get("token_rate_samples", 0) == int(available)

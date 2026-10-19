@@ -22,19 +22,31 @@ def metric_count(value: object) -> int | None:
 def _epoch(value: object) -> float | None:
     if type(value) not in (int, float):
         return None
-    number = float(value)  # type: ignore[arg-type]
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except OverflowError:
+        return None
     return number if isfinite(number) and number >= 0 else None
 
 
 def invocation_generation_window(values: dict[str, object]) -> tuple[float, str] | None:
     """Seconds attributable to output for one model invocation, with its basis.
 
-    ``decode`` spans first stream chunk to response end; non-streamed calls fall
-    back to the full ``request`` duration, which includes time to first token.
+    ``decode`` is the historical wire name for an observed stream window, from
+    the first accepted chunk/event (possibly role/reasoning/lifecycle) to end.
+    ``request`` uses the full request duration, including first-byte and retry waits.
     """
+    started = _epoch(values.get("started_at"))
     ended = _epoch(values.get("ended_at"))
     first = _epoch(values.get("first_chunk_at"))
-    if values.get("first_chunk_at") is not None and first is None:
+    for name, parsed in (("started_at", started), ("ended_at", ended), ("first_chunk_at", first)):
+        if values.get(name) is not None and parsed is None:
+            return None
+    if first is not None and ended is None:
+        return None
+    if started is not None and (
+        ended is not None and ended < started or first is not None and first < started
+    ):
         return None
     if ended is not None and first is not None:
         seconds, basis = ended - first, "decode"
@@ -46,6 +58,26 @@ def invocation_generation_window(values: dict[str, object]) -> tuple[float, str]
     if not (isfinite(seconds) and 0 < seconds < RATE_MAX_INVOCATION_SECONDS):
         return None
     return seconds, basis
+
+
+def completion_output_rate(value: object) -> tuple[float, str] | None:
+    """Validate live and checkpoint display rates at every presentation boundary."""
+    if type(value) is not dict:
+        return None
+    rate = _epoch(value.get("output_tps"))
+    basis = value.get("basis")
+    if rate is None or not 0 < rate < 1_000_000 or basis not in ("decode", "request"):
+        return None
+    return rate, basis
+
+
+def retained_output_rate(tokens: object) -> tuple[float, str] | None:
+    if type(tokens) is not dict:
+        return None
+    count = metric_count(tokens.get("output_tokens"))
+    if count is None or count < RATE_MIN_OUTPUT_TOKENS:
+        return None
+    return completion_output_rate({"output_tps": tokens.get("output_tps"), "basis": tokens.get("rate_basis")})
 
 
 def metric_label(value: object) -> str:
@@ -70,6 +102,7 @@ class TurnMetrics:
     gen_seconds: float = 0.0
     rate_complete: bool = True
     rate_request_basis: bool = False
+    rate_route: tuple[str, str] | None = None
     request_ids: set[str] = field(default_factory=set, repr=False)
 
     def observe_api(self, values: dict[str, object]) -> None:
@@ -92,6 +125,10 @@ class TurnMetrics:
         if model:
             self.model = model
             self.provider = metric_label(values.get("provider"))
+        route = (model, metric_label(values.get("provider")))
+        if self.rate_route is not None and route != self.rate_route:
+            self.rate_complete = False
+        self.rate_route = route
         # MoA: usage describes only the aggregator while timing spans the advisors.
         if values.get("moa_references"):
             self.rate_complete = False
@@ -130,14 +167,14 @@ class TurnMetrics:
             self.rate_request_basis = self.rate_request_basis or window[1] == "request"
 
     def output_rate(self) -> dict[str, object] | None:
-        """Exact output tokens per generation second, or None when unproven."""
+        """Observed-window rate using exact provider tokens, or None when unproven."""
         if not (self.has_usage and self.usage_complete and self.rate_complete):
             return None
         seconds = self.gen_seconds
         if self.output_tokens < RATE_MIN_OUTPUT_TOKENS or not (isfinite(seconds) and seconds >= RATE_MIN_SECONDS):
             return None
         rate = self.output_tokens / seconds
-        if not isfinite(rate) or rate <= 0:
+        if completion_output_rate({"output_tps": rate, "basis": "decode"}) is None:
             return None
         return {"output_tps": rate, "basis": "request" if self.rate_request_basis else "decode"}
 

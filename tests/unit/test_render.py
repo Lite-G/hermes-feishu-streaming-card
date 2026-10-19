@@ -3140,8 +3140,8 @@ def test_output_rate_is_registered_but_not_a_default_footer_field():
 @pytest.mark.parametrize(
     "tokens,expected",
     [
-        ({"output_tokens": 300, "output_tps": 41.6, "rate_basis": "decode"}, "42 tok/s"),
-        ({"output_tokens": 300, "output_tps": 0.2, "rate_basis": "decode"}, "1 tok/s"),
+        ({"output_tokens": 300, "output_tps": 41.6, "rate_basis": "decode"}, "~42 tok/s (流式)"),
+        ({"output_tokens": 300, "output_tps": 0.2, "rate_basis": "decode"}, "~0.2 tok/s (流式)"),
         ({"output_tokens": 300, "output_tps": 41.6, "rate_basis": "request"}, "~42 tok/s (含TTFT)"),
         ({"output_tps": 41.6, "rate_basis": "decode"}, None),
         ({"output_tokens": 300, "output_tps": 41.6}, None),

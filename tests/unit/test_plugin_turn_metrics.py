@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import copy
+import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -946,7 +948,7 @@ def test_default_footer_does_not_show_output_rate():
         assert "tok/s" not in raw and "↓100" in raw
 
 
-@pytest.mark.parametrize("basis,text", [("decode", "42 tok/s"), ("request", "~42 tok/s (含TTFT)")])
+@pytest.mark.parametrize("basis,text", [("decode", "~42 tok/s (流式)"), ("request", "~42 tok/s (含TTFT)")])
 def test_opt_in_footer_shows_output_rate(basis, text):
     session = rate_session({"output_tps": 42.4, "basis": basis})
     fields = ["duration", "output_tokens", "output_rate"]
@@ -962,7 +964,7 @@ def test_opt_in_footer_shows_output_rate(basis, text):
 @pytest.mark.parametrize(
     "rate",
     [None, {}, {"output_tps": float("nan"), "basis": "decode"}, {"output_tps": -1, "basis": "decode"},
-     {"output_tps": True, "basis": "decode"}, {"output_tps": 40, "basis": "estimate"}, "40 tok/s"],
+     {"output_tps": True, "basis": "decode"}, {"output_tps": 40, "basis": "estimate"}, "~40 tok/s (流式)"],
 )
 def test_opt_in_footer_hides_missing_or_invalid_rate(rate):
     session = rate_session(rate)
@@ -977,23 +979,38 @@ def test_rate_without_output_tokens_is_not_adopted():
 
 HOOK_CONTRACT_SHAS = {
     "v0.22.2": "d923a5eb487a17c0a68801bba9ef0f56c81040a8",
-    "main": "ecac27c0af86064c40eeb8097cc20377cf2eee12",
+    "main": "0ab43d4f67e41be75f4f6c0fa14a86dbcfd3e5b3",
 }
+
+
+RATE_SOURCE_HASHES = {
+    "agent/turn_response_intake.py": {"v0.22.2": "e0cf381f7c9fc9a5bad5e6c955643a86c575707194924f1d680e16170c1e821f", "main": "e0cf381f7c9fc9a5bad5e6c955643a86c575707194924f1d680e16170c1e821f"},
+    "agent/turn_api_request.py": {"v0.22.2": "fae43abf285e6f2b82d1820b7bd62ee10214676a48d6af552b8d62530e59dd15", "main": "fae43abf285e6f2b82d1820b7bd62ee10214676a48d6af552b8d62530e59dd15"},
+    "agent/chat_completion_helpers.py": {"v0.22.2": "d7b982ddeabe7bb02cb92fd905d213ecba3b2d21672e249510f760fff27ec8a1", "main": "8e4348884b780999fd33ddaecca688f1afcfe4f66940b5bac62c222383c41869"},
+    "agent/codex_runtime.py": {"v0.22.2": "88bbcfb34e4a7ab4aadf50ea6409eb35a5a6a615dd821a322768215864756f30", "main": "31799bc1eafb00933cdf6e770b79f95ba8e59837c1cab230734811bdd03db4e8"},
+}
+
+
+@lru_cache(maxsize=8)
+def rate_contract_source(ref, path):
+    name = "HFC_UPSTREAM_LATEST_STABLE_ROOT" if ref == "v0.22.2" else "HFC_UPSTREAM_LATEST_MAIN_ROOT"
+    configured = os.environ.get(name) or os.environ.get("HFC_UPSTREAM_HOOK_CONTRACT_ROOT")
+    if not configured:
+        if os.environ.get("HFC_REQUIRE_UPSTREAM_RATE_CONTRACT") == "1":
+            pytest.fail(f"required pinned Hermes rate source missing: {name}")
+        pytest.skip("pinned Hermes rate source checkout not supplied")
+    source = subprocess.check_output(
+        ["git", "show", f"{HOOK_CONTRACT_SHAS[ref]}:{path}"], cwd=configured,
+        env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+    )
+    assert hashlib.sha256(source).hexdigest() == RATE_SOURCE_HASHES[path][ref]
+    return source
 
 
 @pytest.mark.parametrize("ref", sorted(HOOK_CONTRACT_SHAS))
 def test_upstream_post_api_request_kwargs_feed_exact_rate(ref):
-    """Evaluate the real v0.22.2/main ``post_api_request`` call against the runtime.
-
-    Opt-in: HFC_UPSTREAM_HOOK_CONTRACT_ROOT names a Hermes Git checkout holding both commits.
-    """
-    configured = os.environ.get("HFC_UPSTREAM_HOOK_CONTRACT_ROOT")
-    if not configured:
-        pytest.skip("Hermes Git checkout with v0.22.2/main hook sources not supplied")
-    sha = HOOK_CONTRACT_SHAS[ref]
-    source = subprocess.check_output(
-        ["git", "show", f"{sha}:agent/turn_response_intake.py"], cwd=configured
-    )
+    """Evaluate the pinned real Hermes call; required by upstream CI, optional locally."""
+    source = rate_contract_source(ref, "agent/turn_response_intake.py")
     calls = [
         node for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
@@ -1026,6 +1043,136 @@ def test_upstream_post_api_request_kwargs_feed_exact_rate(ref):
         assert payload["data"]["rate"]["basis"] == "decode"
         assert payload["data"]["rate"]["output_tps"] == pytest.approx(40.0)
         raw = json.dumps(render_card(session, footer_fields=["output_rate"]), ensure_ascii=False)
-        assert "40 tok/s" in raw
+        assert "~40 tok/s (流式)" in raw
     finally:
         runtime.close()
+
+@pytest.mark.parametrize("changes", [
+    {"first": 99.0},
+    {"ended": float("nan"), "duration": 2.5},
+    {"ended": float("inf"), "duration": 2.5},
+    {"started": float("inf"), "duration": 2.5},
+    {"started": 10 ** 400, "duration": 2.5},
+    {"first": 10 ** 400, "duration": 2.5},
+])
+def test_rate_rejects_inconsistent_or_unrepresentable_timestamps(changes):
+    metrics = TurnMetrics(0.0)
+    metrics.observe_api(api_values(**changes))
+    assert "rate" not in metrics.payload(10.0)
+
+
+@pytest.mark.parametrize("route", [
+    {"model": "other-model", "provider": "provider"},
+    {"model": "model", "provider": "other-provider"},
+])
+def test_rate_does_not_attribute_mixed_routes_to_last_model(route):
+    metrics = TurnMetrics(0.0)
+    metrics.observe_api(api_values("a", model="model", provider="provider"))
+    metrics.observe_api(api_values("b", **route))
+    assert "rate" not in metrics.payload(10.0)
+    assert metrics.payload(10.0)["tokens"]["output_tokens"] == 200
+
+
+def test_completion_rejects_unrepresentable_rate_without_losing_answer():
+    session = rate_session({"output_tps": 10 ** 400, "basis": "decode"})
+    assert session.answer_text == "SYNTHETIC_ANSWER"
+    assert "output_tps" not in session.tokens
+
+
+@pytest.mark.parametrize("rate", [10 ** 400, 1_000_000, float("inf"), True])
+def test_checkpoint_rate_is_validated_again_when_rendered(rate):
+    session = rate_session(None)
+    session.tokens.update(output_tps=rate, rate_basis="decode")
+    raw = json.dumps(render_card(session, footer_fields=["output_rate"]), ensure_ascii=False)
+    assert "tok/s" not in raw
+
+@pytest.mark.parametrize("ref", sorted(HOOK_CONTRACT_SHAS))
+def test_upstream_rate_timestamps_include_lifecycle_and_reasoning(ref):
+    # Execute the actual stamp method with a role-only chunk: it precedes text,
+    # so this is an observed stream window, not a first answer-token timestamp.
+    tree = ast.parse(rate_contract_source(ref, "agent/chat_completion_helpers.py"))
+    method, = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_count_chunk"]
+    scope = {"contextlib": contextlib, "time": SimpleNamespace(time=lambda: 101.0),
+             "_estimate_chunk_bytes": lambda chunk: 0}
+    exec(compile(ast.Module([method], type_ignores=[]), "<actual-chunk-stamp>", "exec"), scope)
+    owner = SimpleNamespace(last_chunk_time={"t": 0.0}, agent=SimpleNamespace(_touch_activity=lambda _: None))
+    diag = {}
+    scope["_count_chunk"](owner, diag, SimpleNamespace(choices=[]))
+    assert diag["first_chunk_at"] == 101.0
+
+    tree = ast.parse(rate_contract_source(ref, "agent/codex_runtime.py"))
+    callback, = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_on_event"]
+    # The original callback's timestamp assignment and guard execute before
+    # _codex_event_has_content, including for response.created lifecycle frames.
+    prefix = ast.Module(callback.body[:2], type_ignores=[])
+    agent = SimpleNamespace(_last_api_first_chunk_at=None)
+    exec(compile(prefix, "<actual-response-event-stamp>", "exec"),
+         {"time": SimpleNamespace(time=lambda: 102.0), "agent": agent})
+    assert agent._last_api_first_chunk_at == 102.0
+    assert isinstance(callback.body[2], ast.Assign)
+    assert ast.unparse(callback.body[2].value).startswith("_codex_event_has_content(")
+
+    tree = ast.parse(rate_contract_source(ref, "agent/turn_api_request.py"))
+    build, = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "build_api_request"]
+    reset, = [n for n in build.body if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Attribute) and t.attr == "_last_api_first_chunk_at" for t in n.targets)]
+    agent._last_api_first_chunk_at = 99.0
+    exec(compile(ast.Module([reset], type_ignores=[]), "<actual-attempt-reset>", "exec"), {"agent": agent})
+    assert agent._last_api_first_chunk_at is None
+
+
+@pytest.mark.parametrize("basis", ["decode", "request", None])
+def test_output_rate_checkpoint_round_trip_and_old_tokens(tmp_path, basis):
+    from hermes_feishu_card.session_store import SessionStore
+    session = rate_session({"output_tps": 42, "basis": basis} if basis else None)
+    store = SessionStore(tmp_path)
+    store.save("m", session, "synthetic-platform-message", None, "", {}, "synthetic-client")
+    restored = store.load()[0]["session"]
+    assert restored.tokens == session.tokens
+    assert restored.active_interaction is None
+    assert ("tok/s" in json.dumps(render_card(restored, footer_fields=["output_rate"]))) == bool(basis)
+    # A pre-rate reader still sees the same tokens mapping and v1 envelope.
+    record = json.loads(next(store.root.glob("*.json")).read_text())["record"]
+    assert record["version"] == 1
+    assert not {"output_tps", "rate_basis", "gen_seconds", "rate_route"} & record["session"].keys()
+
+
+def test_rate_terminal_duplicate_late_and_foreign_session_do_not_change_owner():
+    runtime, posted = active_runtime()
+    agent = synthetic_agent()
+    try:
+        invoke_original(runtime, "pre_llm_call", agent)
+        values = api_values("good", model="synthetic-model", provider="synthetic-provider")
+        runtime.handle_post_api_request(**values, turn_id="synthetic-turn", platform="feishu", session_id="foreign-session")
+        runtime.handle_post_api_request(**values, turn_id="foreign-turn", platform="feishu", session_id="synthetic-session")
+        assert not runtime._turns["synthetic-turn"].metrics.has_usage
+        runtime.handle_post_api_request(**values, turn_id="synthetic-turn", platform="feishu", session_id="synthetic-session")
+        runtime.handle_post_api_request(**values, turn_id="synthetic-turn", platform="feishu", session_id="synthetic-session")
+        finish(runtime, agent)
+        payload, session = terminal_session(posted)
+        assert payload["data"]["profile_id"] == "default"
+        assert session.tokens["output_tps"] == 50.0
+        before = copy.deepcopy(posted)
+        runtime.handle_post_api_request(**api_values("late", 900), turn_id="synthetic-turn", platform="feishu", session_id="synthetic-session")
+        assert posted == before
+        assert "synthetic-turn" not in runtime._turns
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("presentation", ["classic", "task"])
+@pytest.mark.parametrize("basis", ["decode", "request"])
+@pytest.mark.parametrize("repetitions", [20, 800])
+def test_opt_in_rate_retains_final_payload_budget(presentation, basis, repetitions):
+    from hermes_feishu_card.card_limits import inspect_card_limits
+    session = rate_session({"output_tps": 999_999, "basis": basis})
+    session.answer_text = "SYNTHETIC_ANSWER\n\n" + ("这是保留完整的回答内容。" * repetitions)
+    card = render_card(session, presentation=presentation,
+                       footer_fields=["duration", "model", "input_tokens", "output_tokens", "output_rate"])
+    assert inspect_card_limits(card).safe
+    raw = json.dumps(card, ensure_ascii=False)
+    if repetitions == 800:
+        assert "已切换为原生消息" in raw
+        assert "tok/s" not in raw
+    else:
+        assert "tok/s" in raw
