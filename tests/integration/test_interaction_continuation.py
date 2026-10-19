@@ -291,6 +291,91 @@ async def test_expired_interaction_continues_below_the_native_fallback(kind):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["clarify", "approval"])
+@pytest.mark.parametrize("expiry_source", ["event", "sweeper"])
+async def test_local_expiry_before_native_failure_preserves_continuation(kind, expiry_source):
+    from hermes_feishu_card.server import _expire_pending_interaction
+
+    client = Client()
+    app = create_app(client, card_config={"flush_interval_ms": 0})
+    async with TestClient(TestServer(app)) as http:
+        await post(http, "message.started", 0)
+        await post(http, "answer.delta", 1, {"text": "BEFORE_LOCAL_EXPIRY"})
+        await post(http, "interaction.requested", 2, {
+            "interaction_id": "local_expiry", "kind": kind, "prompt": "Choose fixture",
+            "options": [{"label": "Once", "value": "once"}],
+            "pause_on_timeout": False,
+            "reply_to_message_id": "om_fixture_anchor", "reply_in_thread": True,
+        })
+        session = app[SESSIONS_KEY]["turn_fixture"]
+        session.active_interaction.requested_at = time.time() - 1000
+        before = len(client.sent)
+        if expiry_source == "sweeper":
+            assert await _expire_pending_interaction(app, "turn_fixture", session, now=time.time())
+            assert len(client.sent) == before
+        await post(http, "interaction.failed", 3, {
+            "interaction_id": "local_expiry", "error": "交互已过期",
+        })
+        await post(http, "answer.delta", 4, {"text": "AFTER_LOCAL_EXPIRY"})
+        assert len(client.sent) == before + 1
+        owner = client.sent[-1][0]
+        generation = session.display_segment["generation"]
+        # Higher-sequence duplicates and late/reordered choices must not reset
+        # the already committed owner or erase this segment's output.
+        await post(http, "interaction.failed", 5, {"interaction_id": "local_expiry"})
+        await post(http, "interaction.completed", 6, {"interaction_id": "local_expiry", "choice": "once"})
+        await post(http, "interaction.failed", 3, {"interaction_id": "local_expiry"})
+        await post(http, "answer.delta", 7, {"text": "TAIL_AFTER_LOCAL_EXPIRY"})
+        await post(http, "message.completed", 8, {"answer": "FINAL_LOCAL_EXPIRY"})
+        await asyncio.sleep(.02)
+        assert len(client.sent) == before + 1
+        assert app[FEISHU_MESSAGE_IDS_KEY]["turn_fixture"] == owner
+        assert session.display_segment["generation"] == generation
+        assert session.active_interaction.status == "failed"
+        assert "FINAL_LOCAL_EXPIRY" in str(client.updated[-1][1])
+        assert not client.cross_dialect
+
+
+@pytest.mark.asyncio
+async def test_successive_failed_approvals_keep_scope_freeze_and_thread_route():
+    client = Client()
+    app = create_app(client, card_config={"flush_interval_ms": 0})
+    async with TestClient(TestServer(app)) as http:
+        await post(http, "message.started", 0)
+        for sequence, identifier in ((1, "first"), (6, "second")):
+            await post(http, "interaction.requested", sequence, {
+                "interaction_id": identifier, "kind": "approval", "prompt": "Allow fixture?",
+                "description": f"EXACT_SCOPE_{identifier}",
+                "options": [{"label": "Once", "value": "once"}, {"label": "Deny", "value": "deny"}],
+                "thread_id": "omt_fixture_thread", "reply_to_message_id": "om_fixture_parent",
+                "reply_in_thread": True,
+            })
+            session = app[SESSIONS_KEY]["turn_fixture"]
+            receipt_id = session.active_interaction.feishu_message_id
+            updates = len(client.updated)
+            # Streaming activity while the next question is pending must not
+            # clear its input, and a stale failure must not fail that question.
+            await post(http, "answer.delta", sequence + 1, {"text": "WHILE_PENDING"})
+            await post(http, "interaction.failed", sequence + 2, {"interaction_id": "older_question"})
+            await asyncio.sleep(.02)
+            assert session.active_interaction.status == "pending"
+            assert not any(mid == receipt_id for mid, _ in client.updated[updates:])
+            await post(http, "interaction.failed", sequence + 3, {"interaction_id": identifier, "error": "EXPIRED_FIXTURE"})
+            await post(http, "answer.delta", sequence + 4, {"text": f"AFTER_{identifier}"})
+            await asyncio.sleep(.02)
+            assert session.display_segment["generation"] == (1 if identifier == "first" else 2)
+            mid, card, route = client.sent[-1]
+            assert app[FEISHU_MESSAGE_IDS_KEY]["turn_fixture"] == mid
+            assert f"AFTER_{identifier}" in str(card)
+            assert route["thread_id"] == "omt_fixture_thread"
+            assert route["reply_to_message_id"] == "om_fixture_parent" and route["reply_in_thread"]
+            receipt = [card for receipt_mid, card in client.updated if receipt_mid == receipt_id][-1]
+            assert f"EXACT_SCOPE_{identifier}" in str(receipt)
+            assert "interaction.select" not in str(receipt)
+        assert not client.cross_dialect
+
+
+@pytest.mark.asyncio
 async def test_terminal_closing_an_open_interaction_creates_no_continuation():
     client = Client()
     app = create_app(client, card_config={"flush_interval_ms": 0})
